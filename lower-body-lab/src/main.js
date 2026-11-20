@@ -64,6 +64,8 @@ let rootUprightEnabled = false;
 let rootUprightSign = 1;
 let rootUprightKp = 140;
 let rootUprightKd = 18;
+let rootUprightMaxMoment = 240;
+let lastRootUprightTorque = new THREE.Vector3();
 const torqueChildJolt = null;
 const torqueParentJolt = null;
 
@@ -576,6 +578,7 @@ function updateWorldReferencedTargets() {
 
 function updateRootUprightMoment() {
   for (const joint of joints) joint.extraWorldTorque.set(0, 0, 0);
+  lastRootUprightTorque.set(0, 0, 0);
   if (!rootUprightEnabled) return;
 
   const pelvis = partByName.get('pelvis');
@@ -599,8 +602,10 @@ function updateRootUprightMoment() {
     .multiplyScalar(rootUprightSign);
 
   const magnitude = pelvisTorque.length();
-  const maxRootMoment = 240;
-  if (magnitude > maxRootMoment) pelvisTorque.multiplyScalar(maxRootMoment / magnitude);
+  if (magnitude > rootUprightMaxMoment) {
+    pelvisTorque.multiplyScalar(rootUprightMaxMoment / Math.max(magnitude, 1e-8));
+  }
+  lastRootUprightTorque.copy(pelvisTorque);
 
   // The requested moment acts on the pelvis; equal/opposite moments act on
   // both thighs through the two hip actuators, preserving angular momentum.
@@ -752,7 +757,9 @@ function updateBodyCache() {
       enabled: rootUprightEnabled,
       kp: rootUprightKp,
       kd: rootUprightKd,
-      sign: rootUprightSign
+      sign: rootUprightSign,
+      maxMoment: rootUprightMaxMoment,
+      appliedMoment: lastRootUprightTorque.length()
     },
     groundedFeet: feet.filter(function (foot) { return foot.grounded; }).map(function (foot) { return foot.name; }),
     feet: feet,
@@ -876,11 +883,12 @@ function installTestHooks() {
       if (!Object.prototype.hasOwnProperty.call(jointTorqueSign, type)) throw new Error('Unknown joint type: ' + type);
       jointTorqueSign[type] = Number(value) < 0 ? -1 : 1;
     },
-    setRootUprightController: function (enabled, sign, kp, kd) {
+    setRootUprightController: function (enabled, sign, kp, kd, maxMoment) {
       rootUprightEnabled = !!enabled;
       rootUprightSign = Number(sign) < 0 ? -1 : 1;
       if (Number.isFinite(Number(kp))) rootUprightKp = Math.max(0, Math.min(600, Number(kp)));
       if (Number.isFinite(Number(kd))) rootUprightKd = Math.max(0, Math.min(80, Number(kd)));
+      if (Number.isFinite(Number(maxMoment))) rootUprightMaxMoment = Math.max(0, Math.min(400, Number(maxMoment)));
     },
     applyImpulse: applyImpulse,
     anchorError: window.__lowerBodyAnchorError
