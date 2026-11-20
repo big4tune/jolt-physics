@@ -57,6 +57,7 @@ const selfContactPairs = new Set();
 const contactEventStats = { added: 0, persisted: 0, removed: 0 };
 const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
 const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
+const worldTargetMode = { hip: false, ankle: false };
 const torqueChildJolt = null;
 const torqueParentJolt = null;
 
@@ -546,6 +547,20 @@ function addTorquePair(joint, torque) {
   torqueStats.active += 1;
 }
 
+function updateWorldReferencedTargets() {
+  const uprightWorld = new THREE.Quaternion();
+
+  for (const joint of joints) {
+    const useWorldReference = (joint.type === 'hip' && worldTargetMode.hip)
+      || (joint.type === 'ankle' && worldTargetMode.ankle);
+    if (!useWorldReference) continue;
+
+    const parentQj = bodyInterface.GetRotation(joint.parent.bodyId);
+    const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
+    joint.targetRelative.copy(parentQ.invert().multiply(uprightWorld)).normalize();
+  }
+}
+
 function applyJointMuscleTorques() {
   torqueStats.maxRequested = 0;
   torqueStats.maxApplied = 0;
@@ -696,6 +711,7 @@ function updateBodyCache() {
 }
 
 function stepFixedPhysics() {
+  updateWorldReferencedTargets();
   applyJointMuscleTorques();
   joltInterface.Step(FIXED_DT, 1);
   contactTrackingReady = true;
@@ -768,6 +784,11 @@ function installTestHooks() {
     reset: resetSimulation,
     setMuscleStrength: setMuscleStrength,
     setStiffness: setStiffness,
+    setWorldTargetMode: function (kind, enabled) {
+      if (!Object.prototype.hasOwnProperty.call(worldTargetMode, kind)) throw new Error('Unknown world target mode: ' + kind);
+      worldTargetMode[kind] = !!enabled;
+      for (const joint of joints) joint.targetRelative.copy(joint.defaultRelative);
+    },
     setJointTorqueScale: function (type, value) {
       if (!Object.prototype.hasOwnProperty.call(jointTorqueScale, type)) throw new Error('Unknown joint type: ' + type);
       jointTorqueScale[type] = Math.max(0, Math.min(1, Number(value)));
