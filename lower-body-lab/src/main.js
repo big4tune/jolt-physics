@@ -640,8 +640,7 @@ function updateRootUprightMoment() {
   const axis = sinHalf < 1e-6
     ? new THREE.Vector3()
     : new THREE.Vector3(correctionQ.x / sinHalf, correctionQ.y / sinHalf, correctionQ.z / sinHalf);
-  const omegaJ = bodyInterface.GetAngularVelocity(pelvis.bodyId);
-  const omega = new THREE.Vector3(omegaJ.GetX(), omegaJ.GetY(), omegaJ.GetZ());
+  const omega = readBodyAngularVelocity(pelvis.bodyId);
   const tiltOmega = omega.addScaledVector(WORLD_UP, -omega.dot(WORLD_UP));
   const pelvisTorque = axis.multiplyScalar(rootUprightKp * angle)
     .addScaledVector(tiltOmega, -rootUprightKd)
@@ -672,10 +671,8 @@ function applyJointMuscleTorques() {
   const kdScale = Math.sqrt(controllerStiffness);
 
   for (const joint of joints) {
-    const parentQj = bodyInterface.GetRotation(joint.parent.bodyId);
-    const childQj = bodyInterface.GetRotation(joint.child.bodyId);
-    const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
-    const childQ = new THREE.Quaternion(childQj.GetX(), childQj.GetY(), childQj.GetZ(), childQj.GetW());
+    const parentQ = readBodyRotation(joint.parent.bodyId);
+    const childQ = readBodyRotation(joint.child.bodyId);
 
     const parentWorldW = readBodyAngularVelocity(joint.parent.bodyId);
     const childWorldW = readBodyAngularVelocity(joint.child.bodyId);
