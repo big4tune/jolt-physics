@@ -1,0 +1,8 @@
+{
+  "name": "jolt-headless-validation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:jolt": "node test/jolt-smoke.mjs"
+  }
+}
