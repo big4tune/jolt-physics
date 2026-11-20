@@ -204,8 +204,15 @@ replaceOnce(
 );
 
 replaceOnce(
+  '    const kp = joint.baseKp * kpScale;',
+  `    const motorGain = Number(new URLSearchParams(window.location.search).get('motor-gain') || 1);
+    const kp = joint.baseKp * kpScale * motorGain;`,
+  'motor gain A/B scale'
+);
+
+replaceOnce(
   '    const kd = joint.baseKd * kdScale;',
-  '    const kd = joint.baseKd * kdScale * (new URLSearchParams(window.location.search).has("low-damping") ? 0.3 : 1);',
+  '    const kd = joint.baseKd * kdScale * Math.sqrt(motorGain) * (new URLSearchParams(window.location.search).has("low-damping") ? 0.3 : 1);',
   'experimental low damping scale'
 );
 
