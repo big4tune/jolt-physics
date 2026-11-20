@@ -258,8 +258,8 @@ replaceOnce(
 
 replaceOnce(
   '  const ankleTargets = computeAnkleBalanceTargets(errorX, errorZ, 2.4, 0.42);',
-  \`  const ankleTargets = computeAnkleBalanceTargets(errorX, errorZ, 2.4, 0.42);
-  if (new URLSearchParams(window.location.search).has('reverse-ankle-pitch')) ankleTargets.pitch *= -1;\`,
+  `  const ankleTargets = computeAnkleBalanceTargets(errorX, errorZ, 2.4, 0.42);
+  if (new URLSearchParams(window.location.search).has('reverse-ankle-pitch')) ankleTargets.pitch *= -1;`,
   'A/B reverse ankle pitch command'
 );
 
