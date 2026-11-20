@@ -59,6 +59,10 @@ const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
 const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
 const jointTorqueSign = { hip: 1, knee: 1, ankle: 1 };
 const worldTargetMode = { hip: false, ankle: false };
+let rootUprightEnabled = false;
+let rootUprightSign = 1;
+let rootUprightKp = 140;
+let rootUprightKd = 18;
 const torqueChildJolt = null;
 const torqueParentJolt = null;
 
@@ -505,7 +509,8 @@ function createLowerBody() {
       baseMaxTorque: cfg.maxTorque,
       appliedTorque: 0,
       requestedTorque: 0,
-      orientationError: 0
+      orientationError: 0,
+      extraWorldTorque: new THREE.Vector3()
     };
     joints.push(joint);
     Jolt.destroy(settings);
@@ -560,6 +565,37 @@ function updateWorldReferencedTargets() {
     const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
     joint.targetRelative.copy(parentQ.invert().multiply(uprightWorld)).normalize();
   }
+}
+
+function updateRootUprightMoment() {
+  for (const joint of joints) joint.extraWorldTorque.set(0, 0, 0);
+  if (!rootUprightEnabled) return;
+
+  const pelvis = partByName.get('pelvis');
+  const qj = bodyInterface.GetRotation(pelvis.bodyId);
+  const pelvisQ = new THREE.Quaternion(qj.GetX(), qj.GetY(), qj.GetZ(), qj.GetW());
+  const errorQ = new THREE.Quaternion().multiply(pelvisQ.clone().invert()).normalize();
+  if (errorQ.w < 0) errorQ.set(-errorQ.x, -errorQ.y, -errorQ.z, -errorQ.w);
+
+  const angle = 2 * Math.acos(THREE.MathUtils.clamp(errorQ.w, -1, 1));
+  const sinHalf = Math.sqrt(Math.max(0, 1 - errorQ.w * errorQ.w));
+  const axis = sinHalf < 1e-6
+    ? new THREE.Vector3()
+    : new THREE.Vector3(errorQ.x / sinHalf, errorQ.y / sinHalf, errorQ.z / sinHalf);
+  const omegaJ = bodyInterface.GetAngularVelocity(pelvis.bodyId);
+  const omega = new THREE.Vector3(omegaJ.GetX(), omegaJ.GetY(), omegaJ.GetZ());
+  const pelvisTorque = axis.multiplyScalar(rootUprightKp * angle)
+    .addScaledVector(omega, -rootUprightKd)
+    .multiplyScalar(rootUprightSign);
+
+  const magnitude = pelvisTorque.length();
+  const maxRootMoment = 240;
+  if (magnitude > maxRootMoment) pelvisTorque.multiplyScalar(maxRootMoment / magnitude);
+
+  // The requested moment acts on the pelvis; equal/opposite moments act on
+  // both thighs through the two hip actuators, preserving angular momentum.
+  const hips = joints.filter(function (joint) { return joint.type === 'hip'; });
+  for (const hip of hips) hip.extraWorldTorque.copy(pelvisTorque).multiplyScalar(-1 / Math.max(1, hips.length));
 }
 
 function applyJointMuscleTorques() {
@@ -617,7 +653,7 @@ function applyJointMuscleTorques() {
       const axis = sinHalf < 1e-6
         ? new THREE.Vector3()
         : new THREE.Vector3(errorQ.x / sinHalf, errorQ.y / sinHalf, errorQ.z / sinHalf);
-      torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(dampingW, -joint.baseKd * kdScale);
+      torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(dampingW, -joint.baseKd * kdScale).add(joint.extraWorldTorque);
 
       const requested = torque.length();
       const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
@@ -720,6 +756,7 @@ function updateBodyCache() {
 
 function stepFixedPhysics() {
   updateWorldReferencedTargets();
+  updateRootUprightMoment();
   applyJointMuscleTorques();
   joltInterface.Step(FIXED_DT, 1);
   contactTrackingReady = true;
@@ -804,6 +841,12 @@ function installTestHooks() {
     setJointTorqueSign: function (type, value) {
       if (!Object.prototype.hasOwnProperty.call(jointTorqueSign, type)) throw new Error('Unknown joint type: ' + type);
       jointTorqueSign[type] = Number(value) < 0 ? -1 : 1;
+    },
+    setRootUprightController: function (enabled, sign, kp, kd) {
+      rootUprightEnabled = !!enabled;
+      rootUprightSign = Number(sign) < 0 ? -1 : 1;
+      if (Number.isFinite(Number(kp))) rootUprightKp = Math.max(0, Math.min(600, Number(kp)));
+      if (Number.isFinite(Number(kd))) rootUprightKd = Math.max(0, Math.min(80, Number(kd)));
     },
     applyImpulse: applyImpulse,
     anchorError: window.__lowerBodyAnchorError
