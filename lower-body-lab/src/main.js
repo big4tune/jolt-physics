@@ -50,6 +50,7 @@ let lastFrameTime = 0;
 let testStepCount = 0;
 let currentMuscleStrength = Number(muscleSlider.value) / 100;
 let controllerStiffness = Number(stiffnessSlider.value) / 100;
+let controllerDamping = 1.0;
 
 const parts = [];
 const partByName = new Map();
@@ -668,7 +669,7 @@ function applyJointMuscleTorques() {
   if (strength <= 1e-6) return;
 
   const kpScale = controllerStiffness;
-  const kdScale = Math.sqrt(controllerStiffness);
+  const kdScale = controllerDamping;
 
   for (const joint of joints) {
     const parentQ = readBodyRotation(joint.parent.bodyId);
@@ -806,6 +807,10 @@ function updateBodyCache() {
     com: com.toArray(),
     rigCom: rigCom.toArray(),
     comVelocity: comVelocity.toArray(),
+    controller: {
+      stiffness: controllerStiffness,
+      damping: controllerDamping
+    },
     rootUpright: {
       enabled: rootUprightEnabled,
       kp: rootUprightKp,
@@ -925,6 +930,10 @@ function setStiffness(value) {
   stiffnessValue.textContent = String(Math.round(controllerStiffness * 100)) + '%';
 }
 
+function setDamping(value) {
+  controllerDamping = Math.max(0.01, Math.min(2.5, Number(value)));
+}
+
 function snapshot() {
   return updateBodyCache();
 }
@@ -940,6 +949,7 @@ function installTestHooks() {
     reset: resetSimulation,
     setMuscleStrength: setMuscleStrength,
     setStiffness: setStiffness,
+    setDamping: setDamping,
     setWorldTargetMode: function (kind, enabled) {
       if (!Object.prototype.hasOwnProperty.call(worldTargetMode, kind)) throw new Error('Unknown world target mode: ' + kind);
       worldTargetMode[kind] = !!enabled;
