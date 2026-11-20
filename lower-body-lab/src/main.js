@@ -925,7 +925,7 @@ function setMuscleStrength(value) {
 }
 
 function setStiffness(value) {
-  controllerStiffness = Math.max(0.35, Math.min(2.0, Number(value)));
+  controllerStiffness = Math.max(0.05, Math.min(2.0, Number(value)));
   stiffnessSlider.value = String(Math.round(controllerStiffness * 100));
   stiffnessValue.textContent = String(Math.round(controllerStiffness * 100)) + '%';
 }
