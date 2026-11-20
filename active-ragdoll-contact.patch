@@ -1,0 +1,143 @@
+--- main.js
++++ main.js
+@@ -41,6 +41,14 @@
+ let jointsByName = new Map();
+ let footParts = [];
+ let totalRagdollMass = 0;
++let contactListener = null;
++let floorBodyKey = null;
++let contactTrackingReady = false;
++const partNameByBodyKey = new Map();
++const liveContactPairs = new Set();
++const floorContactFeet = new Set();
++const selfContactPairs = new Set();
++const contactEventStats = { added: 0, persisted: 0, removed: 0 };
+ let raycaster;
+ let pointer;
+ let accumulator = 0;
+@@ -244,6 +252,51 @@
+   return { descriptors, joints };
+ }
+ 
++function contactPairKey(a, b) {
++  return a < b ? `${a}:${b}` : `${b}:${a}`;
++}
++
++function refreshContactMetadata() {
++  floorContactFeet.clear();
++  selfContactPairs.clear();
++  for (const key of liveContactPairs) {
++    const [a, b] = key.split(':').map(Number);
++    if (a === floorBodyKey || b === floorBodyKey) {
++      const partKey = a === floorBodyKey ? b : a;
++      const name = partNameByBodyKey.get(partKey);
++      if (name && name.startsWith('foot_')) floorContactFeet.add(name);
++      continue;
++    }
++    const nameA = partNameByBodyKey.get(a);
++    const nameB = partNameByBodyKey.get(b);
++    if (nameA && nameB) selfContactPairs.add([nameA, nameB].sort().join('<->'));
++  }
++}
++
++function installJoltContactListener() {
++  contactListener = new Jolt.ContactListenerJS();
++  const setPair = (body1Pointer, body2Pointer, active, kind) => {
++    const body1 = Jolt.wrapPointer(body1Pointer, Jolt.Body);
++    const body2 = Jolt.wrapPointer(body2Pointer, Jolt.Body);
++    const id1 = body1.GetID().GetIndexAndSequenceNumber();
++    const id2 = body2.GetID().GetIndexAndSequenceNumber();
++    const key = contactPairKey(id1, id2);
++    if (active) liveContactPairs.add(key);
++    else liveContactPairs.delete(key);
++    contactEventStats[kind] += 1;
++  };
++  contactListener.OnContactAdded = (body1, body2) => setPair(body1, body2, true, 'added');
++  contactListener.OnContactPersisted = (body1, body2) => setPair(body1, body2, true, 'persisted');
++  contactListener.OnContactRemoved = (pairPointer) => {
++    const pair = Jolt.wrapPointer(pairPointer, Jolt.SubShapeIDPair);
++    const id1 = pair.GetBody1ID().GetIndexAndSequenceNumber();
++    const id2 = pair.GetBody2ID().GetIndexAndSequenceNumber();
++    liveContactPairs.delete(contactPairKey(id1, id2));
++    contactEventStats.removed += 1;
++  };
++  physicsSystem.SetContactListener(contactListener);
++}
++
+ function setupJolt() {
+   const settings = new Jolt.JoltSettings();
+   settings.mMaxWorkerThreads = 2;
+@@ -273,6 +326,7 @@
+   Jolt.destroy(settings);
+   physicsSystem = joltInterface.GetPhysicsSystem();
+   bodyInterface = physicsSystem.GetBodyInterface();
++  installJoltContactListener();
+ }
+ 
+ function createJoltShape(descriptor) {
+@@ -336,6 +390,7 @@
+   settings.mFriction = 1.0;
+   settings.mRestitution = 0.0;
+   const body = bodyInterface.CreateBody(settings);
++  floorBodyKey = body.GetID().GetIndexAndSequenceNumber();
+   bodyInterface.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
+ 
+   Jolt.destroy(settings);
+@@ -415,6 +470,7 @@
+ 
+     const body = bodyInterface.CreateBody(settings);
+     const bodyId = new Jolt.BodyID(body.GetID().GetIndexAndSequenceNumber());
++    partNameByBodyKey.set(bodyId.GetIndexAndSequenceNumber(), descriptor.name);
+     bodyInterface.AddBody(bodyId, Jolt.EActivation_Activate);
+ 
+     const mesh = createVisual(descriptor);
+@@ -759,7 +815,9 @@
+       + Math.abs(axisY.clone().applyQuaternion(q).y) * 0.065
+       + Math.abs(axisZ.clone().applyQuaternion(q).y) * 0.215;
+     foot.bottomY = p.y - extentY;
+-    foot.grounded = foot.bottomY < 0.035 && Math.abs(v.y) < 0.75;
++    foot.grounded = contactTrackingReady
++      ? floorContactFeet.has(foot.name)
++      : foot.bottomY < 0.035 && Math.abs(v.y) < 0.75;
+     if (!foot.grounded) continue;
+     balanceAI.groundedCount += 1;
+     balanceFootCenter.add(p);
+@@ -1328,6 +1386,7 @@
+   evaluateUtilityAI(FIXED_DT);
+   applyJointMuscleTorques();
+   joltInterface.Step(FIXED_DT, 1);
++  contactTrackingReady = true;
+   testStepCount += 1;
+ }
+ 
+@@ -1350,8 +1409,27 @@
+     torsoY: torso?.worldPosition.y ?? null,
+     muscleStrength: currentMuscleStrength,
+     torque: { ...torqueStats },
++    contacts: {
++      trackingReady: contactTrackingReady,
++      groundedFeet: [...floorContactFeet],
++      selfPairs: [...selfContactPairs],
++      livePairCount: liveContactPairs.size,
++      events: { ...contactEventStats },
++    },
++    getUpTimer: balanceAI.getUpTimer,
++    fallTimer: balanceAI.fallTimer,
++    aiScores: { ...balanceAI.scores },
++    stepPlan: balanceAI.step ? {
++      side: balanceAI.step.side,
++      elapsed: balanceAI.step.elapsed,
++      duration: balanceAI.step.duration,
++      start: balanceAI.step.start.toArray(),
++      target: balanceAI.step.target.toArray(),
++    } : null,
++    totalMass: totalRagdollMass,
+     parts: ragdollParts.map((part) => ({
+       name: part.name,
+       position: part.worldPosition.toArray(),
+       velocity: part.worldVelocity.toArray(),
+       rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
+       grounded: part.grounded,
+     })),
+   };
+ }
