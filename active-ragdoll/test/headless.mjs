@@ -32,9 +32,10 @@ try {
   for (let i = 0; i < 10; i++) {
     const s = await page.evaluate(() => window.__ragdollTest.step(12));
     startupTrace.push({
-      time:s.time, mode:s.mode, action:s.action, uprightness:s.uprightness,
-      pelvisY:s.pelvisY, torsoY:s.torsoY, com:s.com, capture:s.capture,
-      parts:s.parts.filter(p=>['head','spine_4','pelvis','thigh_L','shin_L','foot_L','thigh_R','shin_R','foot_R'].includes(p.name)).map(p=>({name:p.name,y:p.position[1],vz:p.velocity[2],rotation:p.rotation})),
+      time:s.time, mode:s.mode, action:s.action, uprightness:s.uprightness, groundedCount:s.groundedCount,
+      pelvisY:s.pelvisY, torsoY:s.torsoY, com:s.com, comVelocity:s.comVelocity, capture:s.capture,
+      outsideDistance:s.outsideDistance, stepPlan:s.stepPlan, contacts:s.contacts,
+      parts:s.parts.filter(p=>['head','spine_4','pelvis','thigh_L','shin_L','foot_L','thigh_R','shin_R','foot_R'].includes(p.name)).map(p=>({name:p.name,y:p.position[1],vy:p.velocity[1],vz:p.velocity[2],grounded:p.grounded,rotation:p.rotation})),
       joints:s.joints.map(j=>({key:j.key,angle:j.angle,target:j.target,torque:j.torque,activation:j.activation}))
     });
   }
@@ -46,7 +47,7 @@ try {
     upperArmSpine: window.__ragdollTest.collisionFilterEnabled(13,9),
     thighOppositeFoot: window.__ragdollTest.collisionFilterEnabled(2,3)
   }));
-  console.log('COLLISION_FILTERS=' + JSON.stringify(pairs));
+  console.log('COLLISION_FILTERS=' + JSON.stringify({filters:pairs,contacts:(await page.evaluate(()=>window.__ragdollTest.snapshot().contacts))}));
 
   const muscle = [];
   for (const strength of [0, 0.5, 1, 1.6]) {
@@ -64,7 +65,7 @@ try {
       state = await page.evaluate(() => window.__ragdollTest.step(60));
       if (fallTime === null && (state.pelvisY < 0.9 || state.uprightness < 0.65)) fallTime = state.time;
     }
-    stability.push({strength,fallTime,final:{time:state.time,mode:state.mode,action:state.action,pelvisY:state.pelvisY,torsoY:state.torsoY,uprightness:state.uprightness,groundedCount:state.groundedCount,com:state.com,comVelocity:state.comVelocity,stepPlan:state.stepPlan,aiScores:state.aiScores},maxAppliedTorque:state.torque.maxApplied});
+    stability.push({strength,fallTime,final:{time:state.time,mode:state.mode,action:state.action,pelvisY:state.pelvisY,torsoY:state.torsoY,uprightness:state.uprightness,groundedCount:state.groundedCount,com:state.com,comVelocity:state.comVelocity,stepPlan:state.stepPlan,aiScores:state.aiScores,contacts:state.contacts},maxAppliedTorque:state.torque.maxApplied});
   }
   console.log('STABILITY_30S=' + JSON.stringify(stability));
 
