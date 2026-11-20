@@ -55,6 +55,33 @@ try {
   }
   console.log('MOTOR_ONLY_TRACE=' + JSON.stringify(motorOnlyTrace));
 
+  // A/B damping-only experiment: same initial pose, muscles, physics and no Utility AI; Kd is 30%.
+  const lowDampingPage = await browser.newPage();
+  lowDampingPage.on('pageerror', e => errors.push(String(e)));
+  lowDampingPage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await lowDampingPage.goto('http://127.0.0.1:4173/?test=1&low-damping=1', { waitUntil: 'networkidle' });
+  await lowDampingPage.waitForFunction(() => !!window.__ragdollTest, { timeout: 30000 });
+  await lowDampingPage.evaluate(() => {
+    window.__ragdollTest.setBalanceAIEnabled(false);
+    window.__ragdollTest.setMuscleStrength(1);
+  });
+  const lowDampingTrace = [];
+  for (let i = 0; i < 10; i++) {
+    const s = await lowDampingPage.evaluate(() => window.__ragdollTest.step(12));
+    lowDampingTrace.push({
+      time:s.time, uprightness:s.uprightness, pelvisY:s.pelvisY, torsoY:s.torsoY,
+      comVelocity:s.comVelocity, groundedCount:s.groundedCount,
+      torque:s.torque,
+      joints:s.joints.map(j=>({
+        key:j.key,angle:j.angle,target:j.target,requested:j.requestedTorque,applied:j.torque,
+        spring:j.springTorque,damping:j.dampingTorque,error:j.orientationErrorAngle,
+        angularSpeed:j.relativeAngularSpeed,activation:j.activation
+      }))
+    });
+  }
+  console.log('LOW_DAMPING_TRACE=' + JSON.stringify(lowDampingTrace));
+  await lowDampingPage.close();
+
   // A/B diagnostic: reverse the sign of every PD torque to validate actuator convention.
   const reversePage = await browser.newPage();
   reversePage.on('pageerror', e => errors.push(String(e)));
