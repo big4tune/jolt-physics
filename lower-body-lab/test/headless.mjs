@@ -220,6 +220,18 @@ try {
   assert.ok(Number.isFinite(anchorError), 'Anchor validation must run');
 
   const startupTrace = await captureStartup(page, { strength: 1 });
+  const firstStartupFrame = startupTrace.samples[0];
+  const startupMotorErrors = firstStartupFrame.joints
+    .filter(joint => joint.type !== 'knee')
+    .filter(joint => !joint.lastServoInput
+      || joint.lastServoInput.errorAngle > 0.001
+      || joint.appliedTorque > 0.1);
+  assert.equal(
+    startupMotorErrors.length,
+    0,
+    'Initial pose must not produce non-zero hip/ankle PD torque: ' + JSON.stringify(startupMotorErrors)
+  );
+
   const passiveStartupTrace = await captureStartup(page, { strength: 0 });
   const ankleOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 0, knee: 0, ankle: 1 } });
   const kneeOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 0, knee: 1, ankle: 0 } });
