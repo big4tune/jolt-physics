@@ -11,6 +11,10 @@ const DISABLE_SELF_COLLISIONS = QUERY.has('no-self-collision');
 const DISABLE_FLOOR_COLLISIONS = QUERY.has('no-floor-contact');
 const FOOT_START_GAP = Math.max(0, Math.min(0.08, Number(QUERY.get('foot-gap') || 0)));
 const PHYSICS_SUBSTEPS = Math.max(1, Math.min(8, Math.floor(Number(QUERY.get('substeps') || 1))));
+const FOOT_PLANT_ENABLED = QUERY.has('foot-plant');
+const FOOT_PLANT_KP = Math.max(0, Math.min(12000, Number(QUERY.get('foot-plant-kp') || 4000)));
+const FOOT_PLANT_KD = Math.max(0, Math.min(500, Number(QUERY.get('foot-plant-kd') || 140)));
+const FOOT_PLANT_MAX_FORCE = Math.max(0, Math.min(3000, Number(QUERY.get('foot-plant-max') || 1500)));
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -432,6 +436,7 @@ function createLowerBody() {
       mass: descriptor.mass,
       isDynamic: motionType === Jolt.EMotionType_Dynamic,
       isKinematic: motionType === Jolt.EMotionType_Kinematic,
+      footPlantTarget: descriptor.group === 'feet' ? descriptor.position.clone() : null,
       descriptor: descriptor,
       body: body,
       bodyId: bodyId,
@@ -609,6 +614,25 @@ function rebaseJointTargets(type = null) {
     joint.defaultRelative.copy(relative);
     joint.targetRelative.copy(relative);
     if (joint.isHinge) joint.targetHingeAngle = joint.constraint.GetCurrentAngle();
+  }
+}
+
+function updateFootPlantController() {
+  if (!FOOT_PLANT_ENABLED) return;
+
+  for (const part of parts) {
+    if (!part.footPlantTarget || !part.isDynamic) continue;
+    const position = readBodyPosition(part.bodyId);
+    const velocity = readBodyLinearVelocity(part.bodyId);
+    const force = part.footPlantTarget.clone().sub(position).multiplyScalar(FOOT_PLANT_KP)
+      .addScaledVector(velocity, -FOOT_PLANT_KD);
+    const magnitude = force.length();
+    if (magnitude > FOOT_PLANT_MAX_FORCE && magnitude > 1e-8) {
+      force.multiplyScalar(FOOT_PLANT_MAX_FORCE / magnitude);
+    }
+    const forceJolt = makeJoltVec3(force.x, force.y, force.z);
+    bodyInterface.AddForce(part.bodyId, forceJolt, Jolt.EActivation_Activate);
+    Jolt.destroy(forceJolt);
   }
 }
 
@@ -813,6 +837,13 @@ function updateBodyCache() {
       stiffness: controllerStiffness,
       damping: controllerDamping
     },
+    stanceDiagnostics: {
+      footPlantEnabled: FOOT_PLANT_ENABLED,
+      footPlantKp: FOOT_PLANT_KP,
+      footPlantKd: FOOT_PLANT_KD,
+      footPlantMaxForce: FOOT_PLANT_MAX_FORCE,
+      substeps: PHYSICS_SUBSTEPS
+    },
     rootUpright: {
       enabled: rootUprightEnabled,
       kp: rootUprightKp,
@@ -871,6 +902,7 @@ function stepFixedPhysics() {
   const substepDt = FIXED_DT / PHYSICS_SUBSTEPS;
   for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep += 1) {
     updateWorldReferencedTargets();
+    updateFootPlantController();
     updateRootUprightMoment();
     applyJointMuscleTorques();
     joltInterface.Step(substepDt, 1);
