@@ -211,23 +211,23 @@ replaceOnce(
 
 replaceOnce(
   '      requestedTorque = pd.requested;',
-  \`      requestedTorque = pd.requested;
+  `      requestedTorque = pd.requested;
       joint.orientationErrorAngle = Math.abs(joint.targetHingeAngle - angle);
       joint.relativeAngularSpeed = Math.abs(angularSpeed);
       joint.springTorque = Math.abs(kp * (joint.targetHingeAngle - angle));
-      joint.dampingTorque = Math.abs(kd * angularSpeed);\`,
+      joint.dampingTorque = Math.abs(kd * angularSpeed);`,
   'hinge spring-damping telemetry'
 );
 
 replaceOnce(
   '      jointTorqueA.copy(tempErrorAxis).multiplyScalar(kp).addScaledVector(relativeAngularVelocity, -kd);',
-  \`      const springTorqueVector = tempErrorAxis.clone().multiplyScalar(kp);
+  `      const springTorqueVector = tempErrorAxis.clone().multiplyScalar(kp);
       const dampingTorqueVector = relativeAngularVelocity.clone().multiplyScalar(-kd);
       joint.orientationErrorAngle = angle;
       joint.relativeAngularSpeed = relativeAngularVelocity.length();
       joint.springTorque = springTorqueVector.length();
       joint.dampingTorque = dampingTorqueVector.length();
-      jointTorqueA.copy(springTorqueVector).add(dampingTorqueVector);\`,
+      jointTorqueA.copy(springTorqueVector).add(dampingTorqueVector);`,
   'swing twist spring-damping telemetry'
 );
 
