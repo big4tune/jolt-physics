@@ -27,6 +27,19 @@ try {
   assert.equal(initial.joints.length, 18);
   console.log('RAGDOLL_INITIAL=' + JSON.stringify(initial));
 
+  await page.evaluate(() => { window.__ragdollTest.reset(); window.__ragdollTest.setMuscleStrength(1); });
+  const startupTrace = [];
+  for (let i = 0; i < 10; i++) {
+    const s = await page.evaluate(() => window.__ragdollTest.step(12));
+    startupTrace.push({
+      time:s.time, mode:s.mode, action:s.action, uprightness:s.uprightness,
+      pelvisY:s.pelvisY, torsoY:s.torsoY, com:s.com, capture:s.capture,
+      parts:s.parts.filter(p=>['head','spine_4','pelvis','thigh_L','shin_L','foot_L','thigh_R','shin_R','foot_R'].includes(p.name)).map(p=>({name:p.name,y:p.position[1],vz:p.velocity[2],rotation:p.rotation})),
+      joints:s.joints.map(j=>({key:j.key,angle:j.angle,target:j.target,torque:j.torque,activation:j.activation}))
+    });
+  }
+  console.log('STARTUP_TRACE=' + JSON.stringify(startupTrace));
+
   const pairs = await page.evaluate(() => ({
     footShin: window.__ragdollTest.collisionFilterEnabled(0,1),
     footHead: window.__ragdollTest.collisionFilterEnabled(0,12),
