@@ -41,6 +41,38 @@ try {
   }
   console.log('STARTUP_TRACE=' + JSON.stringify(startupTrace));
 
+  // Motor-only baseline: leave the anatomical target pose fixed and disable Utility AI decisions.
+  await page.evaluate(() => { window.__ragdollTest.reset(); window.__ragdollTest.setBalanceAIEnabled(false); });
+  const motorOnlyTrace = [];
+  for (let i = 0; i < 10; i++) {
+    const s = await page.evaluate(() => window.__ragdollTest.step(12));
+    motorOnlyTrace.push({
+      time:s.time, uprightness:s.uprightness, pelvisY:s.pelvisY, torsoY:s.torsoY,
+      com:s.com, comVelocity:s.comVelocity, groundedCount:s.groundedCount,
+      action:s.action, torque:s.torque,
+      knee:s.joints.filter(j=>j.key.includes('->shin_')).map(j=>({key:j.key,angle:j.angle,target:j.target,torque:j.torque,requested:j.requestedTorque}))
+    });
+  }
+  console.log('MOTOR_ONLY_TRACE=' + JSON.stringify(motorOnlyTrace));
+
+  // A/B diagnostic: reverse the sign of every PD torque to validate actuator convention.
+  const reversePage = await browser.newPage();
+  reversePage.on('pageerror', e => errors.push(String(e)));
+  reversePage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await reversePage.goto('http://127.0.0.1:4173/?test=1&reverse-muscle-torque=1', { waitUntil: 'networkidle' });
+  await reversePage.waitForFunction(() => !!window.__ragdollTest, { timeout: 30000 });
+  const reverseTrace = [];
+  for (let i = 0; i < 10; i++) {
+    const s = await reversePage.evaluate(() => window.__ragdollTest.step(12));
+    reverseTrace.push({
+      time:s.time, uprightness:s.uprightness, pelvisY:s.pelvisY, torsoY:s.torsoY,
+      com:s.com, comVelocity:s.comVelocity, groundedCount:s.groundedCount,
+      action:s.action, torque:s.torque
+    });
+  }
+  console.log('REVERSE_TORQUE_TRACE=' + JSON.stringify(reverseTrace));
+  await reversePage.close();
+
   // A/B isolate: same initial pose and controller, all self-collision pairs disabled.
   const noCollisionPage = await browser.newPage();
   noCollisionPage.on('pageerror', e => errors.push(String(e)));
