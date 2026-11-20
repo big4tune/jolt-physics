@@ -59,15 +59,27 @@ async function runScenario(page, options) {
     const samples = [];
     let state = null;
     const chunks = Math.ceil(config.duration / 0.5);
+    let lateImpulseApplied = false;
     for (let i = 0; i < chunks; i += 1) {
       state = window.__lowerBodyTest.step(30);
-      if (i % Math.max(1, Math.floor(chunks / 12)) === 0) {
+      if (config.impulseAtSeconds && !lateImpulseApplied && state.time >= config.impulseAtSeconds) {
+        const impulse = config.lateImpulse || [0, 0, 0.8];
+        window.__lowerBodyTest.applyImpulse('pelvis', impulse[0], impulse[1], impulse[2]);
+        lateImpulseApplied = true;
+      }
+      if (i % Math.max(1, Math.floor(chunks / 24)) === 0) {
+        const pelvis = state.parts.find(part => part.name === 'pelvis');
         samples.push({
           time: state.time,
           pelvisY: state.pelvisY,
           pelvisUp: state.pelvisUp,
+          pelvisVelocity: pelvis.velocity,
+          pelvisAngularVelocity: pelvis.angularVelocity,
           com: state.com,
+          rigCom: state.rigCom,
           comVelocity: state.comVelocity,
+          dynamicMass: state.dynamicMass,
+          rootUpright: state.rootUpright,
           groundedFeet: state.groundedFeet,
           knees: state.joints.filter(j => j.type === 'knee').map(j => ({
             key: j.key,
@@ -154,9 +166,20 @@ try {
   const pinnedInitial = await pinnedPage.evaluate(() => window.__lowerBodyTest.snapshot());
   const pinnedFeetBaseline = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 15 });
   const pinnedFeetRootUpright = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 15, rootUpright: { enabled: true, kp: 220, kd: 24 } });
+  const pinnedFeetRoot220_40_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 220, kd: 40 } });
+  const pinnedFeetRoot300_60_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 300, kd: 60 } });
+  const pinnedFeetRoot140_36_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 140, kd: 36 } });
+  const pinnedFeetRootImpulseAt5s = await runScenario(pinnedPage, {
+    strength: 1,
+    stiffness: 1,
+    duration: 15,
+    rootUpright: { enabled: true, kp: 220, kd: 40 },
+    impulseAtSeconds: 5,
+    lateImpulse: [0, 0, 0.8]
+  });
   await pinnedPage.close();
 
-  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final];
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRootImpulseAt5s.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -178,7 +201,8 @@ try {
       })),
       pinnedFeetModel: pinnedInitial.parts.filter(part => part.name.startsWith('foot_')).map(part => ({
         name: part.name,
-        isDynamic: part.isDynamic
+        isDynamic: part.isDynamic,
+        isKinematic: part.isKinematic
       })),
       initialJoints: initial.joints.map(joint => ({
         key: joint.key,
@@ -209,7 +233,11 @@ try {
       rootUprightPlusAnkle15s: rootUprightPlusAnkle15s,
       pelvisImpulse08_8s: impulse,
       pinnedFeetBaseline15s: pinnedFeetBaseline,
-      pinnedFeetRootUpright15s: pinnedFeetRootUpright
+      pinnedFeetRootUpright220_24_15s: pinnedFeetRootUpright,
+      pinnedFeetRoot220_40_30s: pinnedFeetRoot220_40_30s,
+      pinnedFeetRoot300_60_30s: pinnedFeetRoot300_60_30s,
+      pinnedFeetRoot140_36_30s: pinnedFeetRoot140_36_30s,
+      pinnedFeetRootImpulseAt5s: pinnedFeetRootImpulseAt5s
     },
     browserErrors: errors
   };
