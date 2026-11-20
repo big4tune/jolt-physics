@@ -37,6 +37,7 @@ async function captureStartup(page, config = {}) {
     api.reset();
     api.setMuscleStrength(options.strength ?? 1);
     api.setStiffness(options.stiffness ?? 1);
+    api.setDamping(options.damping ?? 1);
     api.setWorldTargetMode('hip', false);
     api.setWorldTargetMode('ankle', false);
     api.setJointTorqueScale('hip', options.scales?.hip ?? 1);
@@ -123,6 +124,7 @@ async function runScenario(page, options) {
     window.__lowerBodyTest.reset();
     window.__lowerBodyTest.setMuscleStrength(config.strength);
     window.__lowerBodyTest.setStiffness(config.stiffness);
+    window.__lowerBodyTest.setDamping(config.damping ?? 1);
     window.__lowerBodyTest.setWorldTargetMode('hip', config.worldTargets?.hip ?? false);
     window.__lowerBodyTest.setWorldTargetMode('ankle', config.worldTargets?.ankle ?? false);
     window.__lowerBodyTest.setJointTorqueScale('hip', config.scales?.hip ?? 1);
@@ -292,6 +294,14 @@ try {
   const freeFeetRoot35_8_70_30s = await runScenario(page, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 35, kd: 8, maxMoment: 70 } });
   const freeFeetRoot35_8_70AnkleWorld30s = await runScenario(page, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 35, kd: 8, maxMoment: 70 }, worldTargets: { ankle: true } });
   const freeFeetRoot35_8_70HipAnkleWorld30s = await runScenario(page, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 35, kd: 8, maxMoment: 70 }, worldTargets: { hip: true, ankle: true } });
+  const dynamicFeetStiffness050Damping01030s = await runScenario(page, { strength: 1, stiffness: 0.5, damping: 0.1, duration: 30 });
+  const dynamicFeetStiffness025Damping01030s = await runScenario(page, { strength: 1, stiffness: 0.25, damping: 0.1, duration: 30 });
+  const dynamicFeetStiffness025Damping00530s = await runScenario(page, { strength: 1, stiffness: 0.25, damping: 0.05, duration: 30 });
+  const dynamicFeetStiffness010Damping00530s = await runScenario(page, { strength: 1, stiffness: 0.1, damping: 0.05, duration: 30 });
+  const dynamicFeetStiffness025Damping010Root20_5_30s = await runScenario(page, {
+    strength: 1, stiffness: 0.25, damping: 0.1, duration: 30,
+    rootUpright: { enabled: true, kp: 20, kd: 5, maxMoment: 50 }
+  });
   const pinnedFeetRootImpulseAt5s = await runScenario(pinnedPage, {
     strength: 1,
     stiffness: 1,
@@ -302,7 +312,7 @@ try {
   });
   await pinnedPage.close();
 
-  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRoot20_5_50_30s.final, pinnedFeetRoot35_8_70_30s.final, pinnedFeetRoot60_12_100_30s.final, pinnedFeetRoot35_8_70Delayed30s.final, pinnedFeetRoot35_8_70Disturbance15s.final, freeFeetRoot20_5_50_30s.final, freeFeetRoot35_8_70_30s.final, freeFeetRoot35_8_70AnkleWorld30s.final, freeFeetRoot35_8_70HipAnkleWorld30s.final, pinnedFeetRootImpulseAt5s.final];
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRoot20_5_50_30s.final, pinnedFeetRoot35_8_70_30s.final, pinnedFeetRoot60_12_100_30s.final, pinnedFeetRoot35_8_70Delayed30s.final, pinnedFeetRoot35_8_70Disturbance15s.final, freeFeetRoot20_5_50_30s.final, freeFeetRoot35_8_70_30s.final, freeFeetRoot35_8_70AnkleWorld30s.final, freeFeetRoot35_8_70HipAnkleWorld30s.final, pinnedFeetRootImpulseAt5s.final, dynamicFeetStiffness050Damping01030s.final, dynamicFeetStiffness025Damping01030s.final, dynamicFeetStiffness025Damping00530s.final, dynamicFeetStiffness010Damping00530s.final, dynamicFeetStiffness025Damping010Root20_5_30s.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -384,6 +394,11 @@ try {
       freeFeetRoot35_8_70_30s: freeFeetRoot35_8_70_30s,
       freeFeetRoot35_8_70AnkleWorld30s: freeFeetRoot35_8_70AnkleWorld30s,
       freeFeetRoot35_8_70HipAnkleWorld30s: freeFeetRoot35_8_70HipAnkleWorld30s,
+      dynamicFeetStiffness050Damping01030s: dynamicFeetStiffness050Damping01030s,
+      dynamicFeetStiffness025Damping01030s: dynamicFeetStiffness025Damping01030s,
+      dynamicFeetStiffness025Damping00530s: dynamicFeetStiffness025Damping00530s,
+      dynamicFeetStiffness010Damping00530s: dynamicFeetStiffness010Damping00530s,
+      dynamicFeetStiffness025Damping010Root20_5_30s: dynamicFeetStiffness025Damping010Root20_5_30s,
       pinnedFeetRootImpulseAt5s: pinnedFeetRootImpulseAt5s
     },
     browserErrors: errors
