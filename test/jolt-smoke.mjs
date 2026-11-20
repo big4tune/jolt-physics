@@ -42,7 +42,7 @@ try {
     floorShape, new Jolt.RVec3(0, -0.5, 0),
     new Jolt.Quat(0, 0, 0, 1), Jolt.EMotionType_Static, 0
   );
-  floorShape.Release();
+  // Keep the JS-owned shape wrapper alive; official Jolt examples do not Release() directly constructed shapes.
   floorBody = bodyInterface.CreateBody(floorSettings);
   Jolt.destroy(floorSettings);
   bodyInterface.AddBody(floorBody.GetID(), Jolt.EActivation_DontActivate);
@@ -53,7 +53,7 @@ try {
     sphereShape, new Jolt.RVec3(0, 4, 0),
     new Jolt.Quat(0, 0, 0, 1), Jolt.EMotionType_Dynamic, 0
   );
-  sphereShape.Release();
+  // Keep the JS-owned shape wrapper alive until teardown.
   sphereBody = bodyInterface.CreateBody(sphereSettings);
   Jolt.destroy(sphereSettings);
   bodyInterface.AddBody(sphereBody.GetID(), Jolt.EActivation_Activate);
