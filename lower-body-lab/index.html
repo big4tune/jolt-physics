@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jolt — Lower Body Lab</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">JOLT PHYSICS / EXPERIMENT 01</div>
+          <h1>Lower Body Lab</h1>
+        </div>
+        <div class="status-pill" id="engine-state">
+          <span class="status-dot"></span>
+          <span id="state-label">Загрузка физики…</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="viewport-panel">
+          <div id="viewport"></div>
+          <div class="viewport-caption">
+            <span>7 rigid bodies</span>
+            <span>6 joints</span>
+            <span>1 ground plane</span>
+          </div>
+          <div id="error-overlay" class="error-overlay hidden"></div>
+        </section>
+
+        <aside class="control-panel">
+          <div class="panel-section">
+            <div class="section-heading">Контроллер</div>
+
+            <label class="control-label" for="muscle-strength">
+              <span>Сила мышц</span>
+              <strong id="muscle-value">100%</strong>
+            </label>
+            <input id="muscle-strength" type="range" min="0" max="160" value="100" step="5" />
+
+            <label class="control-label" for="controller-stiffness">
+              <span>Жёсткость PD</span>
+              <strong id="stiffness-value">100%</strong>
+            </label>
+            <input id="controller-stiffness" type="range" min="35" max="200" value="100" step="5" />
+
+            <div class="button-row">
+              <button id="reset-button" type="button">Сброс</button>
+              <button id="impulse-button" type="button" class="secondary">Толчок таза</button>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <div class="section-heading">Состояние</div>
+            <div class="metric-grid">
+              <div class="metric">
+                <span>Высота таза</span>
+                <strong id="pelvis-height">—</strong>
+              </div>
+              <div class="metric">
+                <span>Вертикальность</span>
+                <strong id="uprightness">—</strong>
+              </div>
+              <div class="metric">
+                <span>Опорные стопы</span>
+                <strong id="grounded-feet">—</strong>
+              </div>
+              <div class="metric">
+                <span>Макс. момент</span>
+                <strong id="max-torque">—</strong>
+              </div>
+            </div>
+            <pre id="controller-diagnostics">Ожидание симуляции…</pre>
+          </div>
+
+          <div class="panel-section note-section">
+            <div class="section-heading">Модель</div>
+            <p>Таз, два бедра, две голени и две стопы. Позвоночник, голова, руки и Utility AI исключены.</p>
+            <p class="muted">Сначала проверяется пассивная механика и базовые PD-моторы, затем — реакция на импульс.</p>
+          </div>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
