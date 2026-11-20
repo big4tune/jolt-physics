@@ -69,6 +69,7 @@ const contactEventStats = { added: 0, persisted: 0, removed: 0 };
 const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
 const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
 const jointTorqueSign = { hip: 1, knee: 1, ankle: 1 };
+const footPlantStats = { maxForce: 0, maxDeflection: 0 };
 const worldTargetMode = { hip: false, ankle: false };
 let rootUprightEnabled = false;
 let rootUprightSign = 1;
@@ -624,9 +625,12 @@ function updateFootPlantController() {
     if (!part.footPlantTarget || !part.isDynamic) continue;
     const position = readBodyPosition(part.bodyId);
     const velocity = readBodyLinearVelocity(part.bodyId);
+    const positionError = part.footPlantTarget.distanceTo(position);
     const force = part.footPlantTarget.clone().sub(position).multiplyScalar(FOOT_PLANT_KP)
       .addScaledVector(velocity, -FOOT_PLANT_KD);
     const magnitude = force.length();
+    footPlantStats.maxForce = Math.max(footPlantStats.maxForce, Math.min(magnitude, FOOT_PLANT_MAX_FORCE));
+    footPlantStats.maxDeflection = Math.max(footPlantStats.maxDeflection, positionError);
     if (magnitude > FOOT_PLANT_MAX_FORCE && magnitude > 1e-8) {
       force.multiplyScalar(FOOT_PLANT_MAX_FORCE / magnitude);
     }
@@ -842,6 +846,8 @@ function updateBodyCache() {
       footPlantKp: FOOT_PLANT_KP,
       footPlantKd: FOOT_PLANT_KD,
       footPlantMaxForce: FOOT_PLANT_MAX_FORCE,
+      measuredMaxForce: footPlantStats.maxForce,
+      measuredMaxDeflection: footPlantStats.maxDeflection,
       substeps: PHYSICS_SUBSTEPS
     },
     rootUpright: {
@@ -900,6 +906,8 @@ function stepFixedPhysics() {
   // Jolt once with collisionSteps > 1 would subdivide contacts, but would
   // leave the muscle torque frozen for the entire outer frame.
   const substepDt = FIXED_DT / PHYSICS_SUBSTEPS;
+  footPlantStats.maxForce = 0;
+  footPlantStats.maxDeflection = 0;
   for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep += 1) {
     updateWorldReferencedTargets();
     updateFootPlantController();
