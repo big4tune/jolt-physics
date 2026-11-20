@@ -136,6 +136,30 @@ replaceOnce(
 );
 
 replaceOnce(
+  '    setMuscleStrength: updateMuscleStrength,',
+  `    setMuscleStrength: updateMuscleStrength,
+    setBalanceAIEnabled(enabled) {
+      balanceAI.enabled = !!enabled;
+      balanceAI.step = null;
+      restoreBaselineActivations();
+    },`,
+  'headless AI enable switch'
+);
+
+replaceOnce(
+  '    if (jointTorqueA.lengthSq() < 1e-10) continue;',
+  `    if (new URLSearchParams(window.location.search).has('reverse-muscle-torque')) jointTorqueA.negate();
+    if (jointTorqueA.lengthSq() < 1e-10) continue;`,
+  'experimental reverse torque sign switch'
+);
+
+replaceOnce(
+  '      torque: joint.appliedTorque ?? 0,',
+  '      torque: joint.appliedTorque ?? 0,\n      requestedTorque: joint.requestedTorque ?? 0,',
+  'requested torque telemetry'
+);
+
+replaceOnce(
   '  joltInterface.Step(FIXED_DT, 1);\n  testStepCount += 1;',
   '  joltInterface.Step(FIXED_DT, 1);\n  contactTrackingReady = true;\n  testStepCount += 1;',
   'contact tracking activation'
