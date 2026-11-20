@@ -1,0 +1,16 @@
+{
+  "name": "active-ragdoll-headless-ci",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:headless": "node test/headless.mjs"
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0",
+    "vite": "^7.2.2"
+  }
+}
