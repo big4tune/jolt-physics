@@ -37,6 +37,7 @@ let renderer = null;
 let controls = null;
 let floorBodyKey = null;
 let contactListener = null;
+let ragdollGroupFilter = null;
 let contactTrackingReady = false;
 let simulationReady = false;
 let accumulator = 0;
@@ -872,7 +873,7 @@ async function main() {
     Jolt = await initJolt();
     setupJolt();
     addFloor();
-    createLowerBody();
+    ragdollGroupFilter = createLowerBody();
     simulationReady = true;
     syncVisuals();
     setStatus('Физика готова · 7 тел / 6 суставов', 'ready');
