@@ -241,5 +241,20 @@ replaceOnce(
   'snapshot spring damping and velocity telemetry'
 );
 
+replaceOnce(
+  '  const target = start.clone().add(direction);',
+  \`  const target = start.clone().add(direction);
+  if (new URLSearchParams(window.location.search).has('wide-step')) {
+    const sideOffset = side === 'L' ? -0.18 : 0.18;
+    const errorX = balanceAI.capture.x - balanceAI.supportCenter.x;
+    const errorZ = balanceAI.capture.z - balanceAI.supportCenter.z;
+    target.x = clamp(balanceAI.capture.x + sideOffset, -0.72, 0.72);
+    target.z = clamp(balanceAI.capture.z + Math.sign(errorZ || 1) * 0.045, -0.62, 0.78);
+    const delta = target.clone().sub(start);
+    if (delta.length() > 0.32) target.copy(start).add(delta.setLength(0.32));
+  }\`,
+  'A/B preserve stance width and place step beyond capture point'
+);
+
 fs.writeFileSync(path, source);
 console.log('Applied contact-driven support patch to src/main.js');
