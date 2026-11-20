@@ -43,10 +43,30 @@ async function captureStartup(page, config = {}) {
     api.setJointTorqueScale('knee', options.scales?.knee ?? 1);
     api.setJointTorqueScale('ankle', options.scales?.ankle ?? 1);
     api.setRootUprightController(false, 1, 35, 8, 70);
+    if (options.rebase === 'all') api.rebaseJointTargets();
+    else if (options.rebase === 'ankle') api.rebaseJointTargets('ankle');
   }, config);
 
   return page.evaluate(() => {
     const rows = [];
+    const initial = window.__lowerBodyTest.snapshot();
+    const initialState = {
+      pelvisY: initial.pelvisY,
+      pelvisUp: initial.pelvisUp,
+      comVelocity: initial.comVelocity,
+      feet: initial.parts.filter(part => part.name.startsWith('foot_')).map(part => ({
+        name: part.name, position: part.position, rotation: part.rotation, velocity: part.velocity
+      })),
+      shins: initial.parts.filter(part => part.name.startsWith('shin_')).map(part => ({
+        name: part.name, position: part.position, rotation: part.rotation, velocity: part.velocity
+      })),
+      joints: initial.joints.map(joint => ({
+        key: joint.key, type: joint.type, measuredError: joint.measuredError,
+        parentRotation: joint.parentRotation, childRotation: joint.childRotation,
+        targetRelative: joint.targetRelative, currentRelative: joint.currentRelative,
+        lastServoInput: joint.lastServoInput
+      }))
+    };
     for (let frame = 1; frame <= 60; frame += 1) {
       const state = window.__lowerBodyTest.step(1);
       if (frame <= 12 || frame % 3 === 0) {
@@ -80,8 +100,10 @@ async function captureStartup(page, config = {}) {
             key: joint.key,
             type: joint.type,
             error: joint.error,
+            measuredError: joint.measuredError,
             requestedTorque: joint.requestedTorque,
             appliedTorque: joint.appliedTorque,
+            lastServoInput: joint.lastServoInput,
             parentRotation: joint.parentRotation,
             childRotation: joint.childRotation,
             targetRelative: joint.targetRelative,
@@ -92,7 +114,7 @@ async function captureStartup(page, config = {}) {
         });
       }
     }
-    return rows;
+    return { initial: initialState, samples: rows };
   });
 }
 
@@ -202,6 +224,9 @@ try {
   const ankleOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 0, knee: 0, ankle: 1 } });
   const kneeOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 0, knee: 1, ankle: 0 } });
   const hipOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 1, knee: 0, ankle: 0 } });
+  const rebasedAnkleStartupTrace = await captureStartup(page, { strength: 1, rebase: 'ankle' });
+  const rebasedAllStartupTrace = await captureStartup(page, { strength: 1, rebase: 'all' });
+  const rebasedAnkleOnlyStartupTrace = await captureStartup(page, { strength: 1, rebase: 'ankle', scales: { hip: 0, knee: 0, ankle: 1 } });
 
   const noSelfPage = await openLab('&no-self-collision=1');
   const noSelfStartupTrace = await captureStartup(noSelfPage, { strength: 1 });
@@ -306,6 +331,9 @@ try {
       ankleOnly: ankleOnlyStartupTrace,
       kneeOnly: kneeOnlyStartupTrace,
       hipOnly: hipOnlyStartupTrace,
+      rebasedAnkles: rebasedAnkleStartupTrace,
+      rebasedAllJoints: rebasedAllStartupTrace,
+      rebasedAnkleOnlyMotor: rebasedAnkleOnlyStartupTrace,
       noSelfCollisions: noSelfStartupTrace,
       noFloorContact: noFloorStartupTrace,
       footStartGap25mm: footGapStartupTrace
