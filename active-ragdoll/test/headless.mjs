@@ -50,7 +50,7 @@ try {
       time:s.time, uprightness:s.uprightness, pelvisY:s.pelvisY, torsoY:s.torsoY,
       com:s.com, comVelocity:s.comVelocity, groundedCount:s.groundedCount,
       action:s.action, torque:s.torque,
-      knee:s.joints.filter(j=>j.key.includes('->shin_')).map(j=>({key:j.key,angle:j.angle,target:j.target,torque:j.torque,requested:j.requestedTorque}))
+      joints:s.joints.map(j=>({key:j.key,type:j.type,angle:j.angle,target:j.target,torque:j.torque,requested:j.requestedTorque,relativeErrorRad:j.relativeErrorRad,activation:j.activation}))
     });
   }
   console.log('MOTOR_ONLY_TRACE=' + JSON.stringify(motorOnlyTrace));
