@@ -1,0 +1,36 @@
+name: Lower body Jolt lab
+
+on:
+  push:
+    branches:
+      - ci/lower-body-lab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lower-body-physics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Three.js, Vite and Playwright
+        working-directory: lower-body-lab
+        run: npm install --no-audit --no-fund
+      - name: Install headless Chromium
+        working-directory: lower-body-lab
+        run: npx playwright install --with-deps chromium
+      - name: Run lower-body-only physics experiments
+        working-directory: lower-body-lab
+        run: npm run test:headless
+      - name: Upload lower-body diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lower-body-physics-report
+          path: lower-body-lab/test/report.json
+          if-no-files-found: ignore
