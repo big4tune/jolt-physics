@@ -574,18 +574,21 @@ function updateRootUprightMoment() {
   const pelvis = partByName.get('pelvis');
   const qj = bodyInterface.GetRotation(pelvis.bodyId);
   const pelvisQ = new THREE.Quaternion(qj.GetX(), qj.GetY(), qj.GetZ(), qj.GetW());
-  const errorQ = new THREE.Quaternion().multiply(pelvisQ.clone().invert()).normalize();
-  if (errorQ.w < 0) errorQ.set(-errorQ.x, -errorQ.y, -errorQ.z, -errorQ.w);
+  // Correct only pitch and roll. Heading about world-up is deliberately free.
+  const currentUp = WORLD_UP.clone().applyQuaternion(pelvisQ).normalize();
+  const correctionQ = new THREE.Quaternion().setFromUnitVectors(currentUp, WORLD_UP);
+  if (correctionQ.w < 0) correctionQ.set(-correctionQ.x, -correctionQ.y, -correctionQ.z, -correctionQ.w);
 
-  const angle = 2 * Math.acos(THREE.MathUtils.clamp(errorQ.w, -1, 1));
-  const sinHalf = Math.sqrt(Math.max(0, 1 - errorQ.w * errorQ.w));
+  const angle = 2 * Math.acos(THREE.MathUtils.clamp(correctionQ.w, -1, 1));
+  const sinHalf = Math.sqrt(Math.max(0, 1 - correctionQ.w * correctionQ.w));
   const axis = sinHalf < 1e-6
     ? new THREE.Vector3()
-    : new THREE.Vector3(errorQ.x / sinHalf, errorQ.y / sinHalf, errorQ.z / sinHalf);
+    : new THREE.Vector3(correctionQ.x / sinHalf, correctionQ.y / sinHalf, correctionQ.z / sinHalf);
   const omegaJ = bodyInterface.GetAngularVelocity(pelvis.bodyId);
   const omega = new THREE.Vector3(omegaJ.GetX(), omegaJ.GetY(), omegaJ.GetZ());
+  const tiltOmega = omega.addScaledVector(WORLD_UP, -omega.dot(WORLD_UP));
   const pelvisTorque = axis.multiplyScalar(rootUprightKp * angle)
-    .addScaledVector(omega, -rootUprightKd)
+    .addScaledVector(tiltOmega, -rootUprightKd)
     .multiplyScalar(rootUprightSign);
 
   const magnitude = pelvisTorque.length();
