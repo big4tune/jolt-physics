@@ -99,7 +99,7 @@ replaceOnce(
 
 // Once callback data is live, support comes from the physics solver, not a height/velocity guess.
 replaceOnce(
-  '  // A foot is considered planted only while its sole is near the floor and\n  // its vertical speed is low. This is a lightweight contact estimator; the Jolt collision solver remains responsible for the actual ground reaction.\n  balanceAI.groundedCount = 0;',
+  '  // A foot is considered planted only while its sole is near the floor and\n  // its vertical speed is low. This is a lightweight contact estimator; the\\n  // Jolt collision solver remains responsible for the actual ground reaction.\n  balanceAI.groundedCount = 0;',
   '  // Jolt contact callbacks provide the actual foot-floor support state.\n  refreshContactMetadata();\n  balanceAI.groundedCount = 0;',
   'contact measurement header'
 );
