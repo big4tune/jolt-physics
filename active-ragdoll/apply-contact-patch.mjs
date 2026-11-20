@@ -203,5 +203,39 @@ replaceOnce(
   'contact telemetry'
 );
 
+replaceOnce(
+  '    const kd = joint.baseKd * kdScale;',
+  '    const kd = joint.baseKd * kdScale * (new URLSearchParams(window.location.search).has("low-damping") ? 0.3 : 1);',
+  'experimental low damping scale'
+);
+
+replaceOnce(
+  '      requestedTorque = pd.requested;',
+  \`      requestedTorque = pd.requested;
+      joint.orientationErrorAngle = Math.abs(joint.targetHingeAngle - angle);
+      joint.relativeAngularSpeed = Math.abs(angularSpeed);
+      joint.springTorque = Math.abs(kp * (joint.targetHingeAngle - angle));
+      joint.dampingTorque = Math.abs(kd * angularSpeed);\`,
+  'hinge spring-damping telemetry'
+);
+
+replaceOnce(
+  '      jointTorqueA.copy(tempErrorAxis).multiplyScalar(kp).addScaledVector(relativeAngularVelocity, -kd);',
+  \`      const springTorqueVector = tempErrorAxis.clone().multiplyScalar(kp);
+      const dampingTorqueVector = relativeAngularVelocity.clone().multiplyScalar(-kd);
+      joint.orientationErrorAngle = angle;
+      joint.relativeAngularSpeed = relativeAngularVelocity.length();
+      joint.springTorque = springTorqueVector.length();
+      joint.dampingTorque = dampingTorqueVector.length();
+      jointTorqueA.copy(springTorqueVector).add(dampingTorqueVector);\`,
+  'swing twist spring-damping telemetry'
+);
+
+replaceOnce(
+  '      requestedTorque: joint.requestedTorque ?? 0,',
+  '      requestedTorque: joint.requestedTorque ?? 0,\\n      springTorque: joint.springTorque ?? 0,\\n      dampingTorque: joint.dampingTorque ?? 0,\\n      orientationErrorAngle: joint.orientationErrorAngle ?? 0,\\n      relativeAngularSpeed: joint.relativeAngularSpeed ?? 0,',
+  'snapshot spring damping and velocity telemetry'
+);
+
 fs.writeFileSync(path, source);
 console.log('Applied contact-driven support patch to src/main.js');
