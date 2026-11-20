@@ -1,0 +1,75 @@
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import process from 'node:process';
+
+const root = process.cwd();
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4173'], { cwd: root, stdio: 'ignore' });
+const errors = [];
+let browser;
+try {
+  const deadline = Date.now() + 20000;
+  let ready = false;
+  while (Date.now() < deadline) {
+    try { await fetch('http://127.0.0.1:4173'); ready = true; break; } catch { await new Promise(r => setTimeout(r, 250)); }
+  }
+  assert.ok(ready, 'Vite did not start');
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  page.on('pageerror', e => errors.push(String(e)));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.goto('http://127.0.0.1:4173/?test=1', { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => !!window.__ragdollTest || !!document.querySelector('#error-overlay')?.textContent.trim(), { timeout: 30000 });
+  const boot = await page.evaluate(() => ({ api: !!window.__ragdollTest, error: document.querySelector('#error-overlay')?.textContent ?? '' }));
+  assert.ok(boot.api, 'Ragdoll boot failed: ' + boot.error + '\n' + errors.join('\n'));
+  const initial = await page.evaluate(() => window.__ragdollTest.snapshot());
+  assert.equal(initial.parts.length, 19);
+  assert.equal(initial.joints.length, 18);
+  console.log('RAGDOLL_INITIAL=' + JSON.stringify(initial));
+
+  const pairs = await page.evaluate(() => ({
+    footShin: window.__ragdollTest.collisionFilterEnabled(0,1),
+    footHead: window.__ragdollTest.collisionFilterEnabled(0,12),
+    upperArmSpine: window.__ragdollTest.collisionFilterEnabled(13,9),
+    thighOppositeFoot: window.__ragdollTest.collisionFilterEnabled(2,3)
+  }));
+  console.log('COLLISION_FILTERS=' + JSON.stringify(pairs));
+
+  const muscle = [];
+  for (const strength of [0, 0.5, 1, 1.6]) {
+    const s = await page.evaluate(async v => { window.__ragdollTest.reset(); window.__ragdollTest.setMuscleStrength(v); return window.__ragdollTest.step(180); }, strength);
+    muscle.push({ strength, torque:s.torque, pelvisY:s.pelvisY, mode:s.mode, action:s.action, uprightness:s.uprightness });
+  }
+  console.log('MUSCLE_SWEEP=' + JSON.stringify(muscle));
+
+  const stability = [];
+  for (const strength of [0.5, 1, 1.6]) {
+    await page.evaluate(v => { window.__ragdollTest.reset(); window.__ragdollTest.setMuscleStrength(v); }, strength);
+    let state = await page.evaluate(() => window.__ragdollTest.snapshot());
+    let fallTime = null;
+    for (let elapsed = 0; elapsed < 1800; elapsed += 60) {
+      state = await page.evaluate(() => window.__ragdollTest.step(60));
+      if (fallTime === null && (state.pelvisY < 0.9 || state.uprightness < 0.65)) fallTime = state.time;
+    }
+    stability.push({strength,fallTime,final:{time:state.time,mode:state.mode,action:state.action,pelvisY:state.pelvisY,torsoY:state.torsoY,uprightness:state.uprightness,groundedCount:state.groundedCount,com:state.com,comVelocity:state.comVelocity,stepPlan:state.stepPlan,aiScores:state.aiScores},maxAppliedTorque:state.torque.maxApplied});
+  }
+  console.log('STABILITY_30S=' + JSON.stringify(stability));
+
+  await page.evaluate(() => { window.__ragdollTest.reset(); window.__ragdollTest.setMuscleStrength(1); window.__ragdollTest.applyImpulse('spine_4', 0, 0, -8); });
+  const recovery=[];
+  for (let i=0;i<12;i++) {
+    const s=await page.evaluate(()=>window.__ragdollTest.step(60));
+    recovery.push({time:s.time,mode:s.mode,action:s.action,pelvisY:s.pelvisY,groundedCount:s.groundedCount,knees:s.joints.filter(j=>j.key.includes('shin_')).map(j=>j.angle),stepPlan:s.stepPlan,torque:s.torque.maxApplied});
+  }
+  console.log('RECOVERY_12S=' + JSON.stringify(recovery));
+
+  const final = await page.evaluate(() => window.__ragdollTest.snapshot());
+  const hingeViolations = final.joints.filter(j => j.type === 'hinge' && (j.angle < j.min - 0.14 || j.angle > j.max + 0.14));
+  console.log('FINAL=' + JSON.stringify({errors,hingeViolations}));
+  assert.equal(hingeViolations.length,0,'Hinge joint exceeded hard limits');
+  assert.equal(errors.length,0,'Browser errors: ' + errors.join('\n'));
+  console.log('PASS: real Jolt WASM + actual Three.js ragdoll ran in headless Chromium');
+} finally {
+  if (browser) await browser.close();
+  server.kill('SIGTERM');
+}
