@@ -36,6 +36,8 @@ async function runScenario(page, options) {
     window.__lowerBodyTest.reset();
     window.__lowerBodyTest.setMuscleStrength(config.strength);
     window.__lowerBodyTest.setStiffness(config.stiffness);
+    window.__lowerBodyTest.setWorldTargetMode('hip', config.worldTargets?.hip ?? false);
+    window.__lowerBodyTest.setWorldTargetMode('ankle', config.worldTargets?.ankle ?? false);
     window.__lowerBodyTest.setJointTorqueScale('hip', config.scales?.hip ?? 1);
     window.__lowerBodyTest.setJointTorqueScale('knee', config.scales?.knee ?? 1);
     window.__lowerBodyTest.setJointTorqueScale('ankle', config.scales?.ankle ?? 1);
@@ -126,9 +128,12 @@ try {
   const hipDisabled = await runScenario(page, { strength: 1, stiffness: 1, duration: 4, scales: { hip: 0, knee: 1, ankle: 1 } });
   const kneeDisabled = await runScenario(page, { strength: 1, stiffness: 1, duration: 4, scales: { hip: 1, knee: 0, ankle: 1 } });
   const ankleDisabled = await runScenario(page, { strength: 1, stiffness: 1, duration: 4, scales: { hip: 1, knee: 1, ankle: 0 } });
+  const hipWorldTarget = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, worldTargets: { hip: true, ankle: false } });
+  const ankleWorldTarget = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, worldTargets: { hip: false, ankle: true } });
+  const hipAnkleWorldTarget = await runScenario(page, { strength: 1, stiffness: 1, duration: 15, worldTargets: { hip: true, ankle: true } });
   const impulse = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, impulse: [0, 0, 0.8] });
 
-  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, impulse.final];
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, impulse.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -163,6 +168,9 @@ try {
       hipDisabled4s: hipDisabled,
       kneeDisabled4s: kneeDisabled,
       ankleDisabled4s: ankleDisabled,
+      hipWorldTarget8s: hipWorldTarget,
+      ankleWorldTarget8s: ankleWorldTarget,
+      hipAnkleWorldTarget15s: hipAnkleWorldTarget,
       pelvisImpulse08_8s: impulse
     },
     browserErrors: errors
