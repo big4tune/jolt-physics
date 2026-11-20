@@ -243,7 +243,7 @@ replaceOnce(
 
 replaceOnce(
   '  const target = start.clone().add(direction);',
-  \`  const target = start.clone().add(direction);
+  `  const target = start.clone().add(direction);
   if (new URLSearchParams(window.location.search).has('wide-step')) {
     const sideOffset = side === 'L' ? -0.18 : 0.18;
     const errorX = balanceAI.capture.x - balanceAI.supportCenter.x;
@@ -252,7 +252,7 @@ replaceOnce(
     target.z = clamp(balanceAI.capture.z + Math.sign(errorZ || 1) * 0.045, -0.62, 0.78);
     const delta = target.clone().sub(start);
     if (delta.length() > 0.32) target.copy(start).add(delta.setLength(0.32));
-  }\`,
+  }`,
   'A/B preserve stance width and place step beyond capture point'
 );
 
