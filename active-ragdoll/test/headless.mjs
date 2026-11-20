@@ -60,6 +60,32 @@ try {
   console.log('WIDE_STEP_TRACE=' + JSON.stringify(wideStepTrace));
   await wideStepPage.close();
 
+  // A/B pitch-axis convention tests. Each is otherwise the same deterministic initial scene.
+  const postureSignResults = [];
+  for (const flag of ['reverse-ankle-pitch', 'reverse-hip-pitch', 'reverse-spine-pitch']) {
+    const testPage = await browser.newPage();
+    testPage.on('pageerror', e => errors.push(String(e)));
+    testPage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    await testPage.goto('http://127.0.0.1:4173/?test=1&' + flag + '=1', { waitUntil: 'networkidle' });
+    await testPage.waitForFunction(() => !!window.__ragdollTest, { timeout: 30000 });
+    const samples = [];
+    for (let i = 0; i < 6; i++) {
+      const s = await testPage.evaluate(() => window.__ragdollTest.step(12));
+      samples.push({
+        time:s.time, action:s.action, uprightness:s.uprightness,
+        pelvisY:s.pelvisY, torsoY:s.torsoY, groundedCount:s.groundedCount,
+        com:s.com, comVelocity:s.comVelocity, capture:s.capture,
+        stepPlan:s.stepPlan,
+        ankles:s.joints.filter(j=>j.key.startsWith('shin_') && j.key.includes('->foot_')).map(j=>({key:j.key,torque:j.torque,activation:j.activation})),
+        hips:s.joints.filter(j=>j.key.startsWith('pelvis->thigh_')).map(j=>({key:j.key,torque:j.torque,activation:j.activation})),
+        spine:s.joints.filter(j=>j.key.includes('spine_')).map(j=>({key:j.key,torque:j.torque,activation:j.activation}))
+      });
+    }
+    postureSignResults.push({flag,samples});
+    await testPage.close();
+  }
+  console.log('POSTURE_SIGN_AB=' + JSON.stringify(postureSignResults));
+
   // Motor-only baseline: leave the anatomical target pose fixed and disable Utility AI decisions.
   await page.evaluate(() => { window.__ragdollTest.reset(); window.__ragdollTest.setBalanceAIEnabled(false); });
   const motorOnlyTrace = [];
