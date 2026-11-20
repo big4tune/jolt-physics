@@ -5,7 +5,11 @@ import './style.css';
 
 const FIXED_DT = 1 / 60;
 const TEST_MODE = new URLSearchParams(window.location.search).get('test') === '1';
-const PIN_FEET = new URLSearchParams(window.location.search).has('pin-feet');
+const QUERY = new URLSearchParams(window.location.search);
+const PIN_FEET = QUERY.has('pin-feet');
+const DISABLE_SELF_COLLISIONS = QUERY.has('no-self-collision');
+const DISABLE_FLOOR_COLLISIONS = QUERY.has('no-floor-contact');
+const FOOT_START_GAP = Math.max(0, Math.min(0.08, Number(QUERY.get('foot-gap') || 0)));
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -141,7 +145,7 @@ function buildLowerBodyDescriptors() {
 
     addCapsuleDescriptor(descriptors, 'thigh_' + side.suffix, [x, 0.66, 0], [x, 1.055, 0], 0.088, 4.3, 0x648778, 'legs');
     addCapsuleDescriptor(descriptors, 'shin_' + side.suffix, [x, 0.13, -0.08], [x, 0.66, 0], 0.067, 2.3, 0x779c91, 'legs');
-    addBoxDescriptor(descriptors, 'foot_' + side.suffix, [x, 0.065, 0.075], [0.115, 0.065, 0.215], 1.25, 0x647b88, 'feet');
+    addBoxDescriptor(descriptors, 'foot_' + side.suffix, [x, 0.065 + FOOT_START_GAP, 0.075], [0.115, 0.065, 0.215], 1.25, 0x647b88, 'feet');
 
     jointDefs.push({ a: 'pelvis', b: 'thigh_' + side.suffix, anchor: [x, 1.055, 0], type: 'hip' });
     jointDefs.push({ a: 'thigh_' + side.suffix, b: 'shin_' + side.suffix, anchor: [x, 0.66, 0], type: 'knee' });
@@ -216,7 +220,7 @@ function setupJolt() {
   settings.mMaxWorkerThreads = 2;
 
   const objectFilter = new Jolt.ObjectLayerPairFilterTable(2);
-  objectFilter.EnableCollision(LAYER_NON_MOVING, LAYER_MOVING);
+  if (!DISABLE_FLOOR_COLLISIONS) objectFilter.EnableCollision(LAYER_NON_MOVING, LAYER_MOVING);
   objectFilter.EnableCollision(LAYER_MOVING, LAYER_MOVING);
 
   const staticLayer = new Jolt.BroadPhaseLayer(0);
@@ -369,11 +373,19 @@ function createLowerBody() {
   }));
 
   const groupFilter = new Jolt.GroupFilterTable(descriptors.length);
-  for (const def of jointDefs) {
-    const a = descriptorIndex.get(def.a);
-    const b = descriptorIndex.get(def.b);
-    if (a === undefined || b === undefined) throw new Error('Missing joint body: ' + def.a + ' -> ' + def.b);
-    groupFilter.DisableCollision(Math.min(a, b), Math.max(a, b));
+  if (DISABLE_SELF_COLLISIONS) {
+    for (let a = 0; a < descriptors.length; a += 1) {
+      for (let b = a + 1; b < descriptors.length; b += 1) {
+        groupFilter.DisableCollision(a, b);
+      }
+    }
+  } else {
+    for (const def of jointDefs) {
+      const a = descriptorIndex.get(def.a);
+      const b = descriptorIndex.get(def.b);
+      if (a === undefined || b === undefined) throw new Error('Missing joint body: ' + def.a + ' -> ' + def.b);
+      groupFilter.DisableCollision(Math.min(a, b), Math.max(a, b));
+    }
   }
 
   for (let index = 0; index < descriptors.length; index += 1) {
@@ -748,6 +760,12 @@ function updateBodyCache() {
     time: testStepCount * FIXED_DT,
     totalMass: totalMass,
     dynamicMass: dynamicMass,
+    collisionDiagnostics: {
+      selfCollisionsDisabled: DISABLE_SELF_COLLISIONS,
+      floorCollisionsDisabled: DISABLE_FLOOR_COLLISIONS,
+      footStartGap: FOOT_START_GAP,
+      pinnedFeet: PIN_FEET
+    },
     pelvisY: pelvis.worldPosition.y,
     pelvisUp: pelvisUp,
     com: com.toArray(),
@@ -787,7 +805,11 @@ function updateBodyCache() {
         max: joint.isHinge ? joint.max : null,
         error: joint.orientationError,
         requestedTorque: joint.requestedTorque,
-        appliedTorque: joint.appliedTorque
+        appliedTorque: joint.appliedTorque,
+        parentRotation: joint.parent.worldRotation.toArray(),
+        childRotation: joint.child.worldRotation.toArray(),
+        targetRelative: [joint.targetRelative.x, joint.targetRelative.y, joint.targetRelative.z, joint.targetRelative.w],
+        currentRelative: joint.parent.worldRotation.clone().invert().multiply(joint.child.worldRotation).toArray()
       };
     })
   };
