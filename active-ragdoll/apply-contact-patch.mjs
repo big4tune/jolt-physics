@@ -256,5 +256,24 @@ replaceOnce(
   'A/B preserve stance width and place step beyond capture point'
 );
 
+replaceOnce(
+  '  const ankleTargets = computeAnkleBalanceTargets(errorX, errorZ, 2.4, 0.42);',
+  \`  const ankleTargets = computeAnkleBalanceTargets(errorX, errorZ, 2.4, 0.42);
+  if (new URLSearchParams(window.location.search).has('reverse-ankle-pitch')) ankleTargets.pitch *= -1;\`,
+  'A/B reverse ankle pitch command'
+);
+
+replaceOnce(
+  '  const hipPitch = clamp(-Math.atan2(errorZ, height) * 0.48, -0.18, 0.18);',
+  "  const hipPitch = clamp(-Math.atan2(errorZ, height) * 0.48, -0.18, 0.18) * (new URLSearchParams(window.location.search).has('reverse-hip-pitch') ? -1 : 1);",
+  'A/B reverse hip pitch command'
+);
+
+replaceOnce(
+  '  const torsoPitch = clamp(-Math.atan2(errorZ, height) * 0.62, -0.24, 0.24);',
+  "  const torsoPitch = clamp(-Math.atan2(errorZ, height) * 0.62, -0.24, 0.24) * (new URLSearchParams(window.location.search).has('reverse-spine-pitch') ? -1 : 1);",
+  'A/B reverse spine pitch command'
+);
+
 fs.writeFileSync(path, source);
 console.log('Applied contact-driven support patch to src/main.js');
