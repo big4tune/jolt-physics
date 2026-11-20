@@ -564,6 +564,26 @@ function validateInitialAnchors(jointDefs) {
   window.__lowerBodyAnchorError = maximum;
 }
 
+function readBodyRotation(bodyId) {
+  const q = bodyInterface.GetRotation(bodyId);
+  return new THREE.Quaternion(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
+}
+
+function readBodyAngularVelocity(bodyId) {
+  const w = bodyInterface.GetAngularVelocity(bodyId);
+  return new THREE.Vector3(w.GetX(), w.GetY(), w.GetZ());
+}
+
+function readBodyPosition(bodyId) {
+  const p = bodyInterface.GetPosition(bodyId);
+  return new THREE.Vector3(p.GetX(), p.GetY(), p.GetZ());
+}
+
+function readBodyLinearVelocity(bodyId) {
+  const v = bodyInterface.GetLinearVelocity(bodyId);
+  return new THREE.Vector3(v.GetX(), v.GetY(), v.GetZ());
+}
+
 function addTorquePair(joint, torque) {
   if (torque.lengthSq() < 1e-10) return;
   const childTorque = makeJoltVec3(torque.x, torque.y, torque.z);
@@ -578,10 +598,11 @@ function addTorquePair(joint, torque) {
 function rebaseJointTargets(type = null) {
   for (const joint of joints) {
     if (type && joint.type !== type) continue;
-    const parentQj = bodyInterface.GetRotation(joint.parent.bodyId);
-    const childQj = bodyInterface.GetRotation(joint.child.bodyId);
-    const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
-    const childQ = new THREE.Quaternion(childQj.GetX(), childQj.GetY(), childQj.GetZ(), childQj.GetW());
+    // Copy each WASM return immediately. Some Jolt bindings reuse temporary
+    // return storage, so keeping two wrappers alive can make both read as the
+    // second body's transform.
+    const parentQ = readBodyRotation(joint.parent.bodyId);
+    const childQ = readBodyRotation(joint.child.bodyId);
     const relative = parentQ.clone().invert().multiply(childQ).normalize();
     joint.defaultRelative.copy(relative);
     joint.targetRelative.copy(relative);
@@ -597,8 +618,7 @@ function updateWorldReferencedTargets() {
       || (joint.type === 'ankle' && worldTargetMode.ankle);
     if (!useWorldReference) continue;
 
-    const parentQj = bodyInterface.GetRotation(joint.parent.bodyId);
-    const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
+    const parentQ = readBodyRotation(joint.parent.bodyId);
     joint.targetRelative.copy(parentQ.invert().multiply(uprightWorld)).normalize();
   }
 }
@@ -609,8 +629,7 @@ function updateRootUprightMoment() {
   if (!rootUprightEnabled) return;
 
   const pelvis = partByName.get('pelvis');
-  const qj = bodyInterface.GetRotation(pelvis.bodyId);
-  const pelvisQ = new THREE.Quaternion(qj.GetX(), qj.GetY(), qj.GetZ(), qj.GetW());
+  const pelvisQ = readBodyRotation(pelvis.bodyId);
   // Correct only pitch and roll. Heading about world-up is deliberately free.
   const currentUp = WORLD_UP.clone().applyQuaternion(pelvisQ).normalize();
   const correctionQ = new THREE.Quaternion().setFromUnitVectors(currentUp, WORLD_UP);
@@ -658,14 +677,9 @@ function applyJointMuscleTorques() {
     const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
     const childQ = new THREE.Quaternion(childQj.GetX(), childQj.GetY(), childQj.GetZ(), childQj.GetW());
 
-    const parentWj = bodyInterface.GetAngularVelocity(joint.parent.bodyId);
-    const childWj = bodyInterface.GetAngularVelocity(joint.child.bodyId);
-    const childWorldW = new THREE.Vector3(childWj.GetX(), childWj.GetY(), childWj.GetZ());
-    const relativeW = childWorldW.clone().sub(new THREE.Vector3(
-      parentWj.GetX(),
-      parentWj.GetY(),
-      parentWj.GetZ()
-    ));
+    const parentWorldW = readBodyAngularVelocity(joint.parent.bodyId);
+    const childWorldW = readBodyAngularVelocity(joint.child.bodyId);
+    const relativeW = childWorldW.clone().sub(parentWorldW);
     const usesWorldTarget = (joint.type === 'hip' && worldTargetMode.hip)
       || (joint.type === 'ankle' && worldTargetMode.ankle);
     // For a world-fixed target, its angular error derivative is the child's
@@ -734,15 +748,15 @@ function updateBodyCache() {
   refreshContactMetadata();
 
   for (const part of parts) {
-    const p = bodyInterface.GetPosition(part.bodyId);
-    const q = bodyInterface.GetRotation(part.bodyId);
-    const v = bodyInterface.GetLinearVelocity(part.bodyId);
-    const w = bodyInterface.GetAngularVelocity(part.bodyId);
+    const position = readBodyPosition(part.bodyId);
+    const rotation = readBodyRotation(part.bodyId);
+    const linearVelocity = readBodyLinearVelocity(part.bodyId);
+    const angularVelocity = readBodyAngularVelocity(part.bodyId);
 
-    part.worldPosition.set(p.GetX(), p.GetY(), p.GetZ());
-    part.worldRotation.set(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
-    part.worldVelocity.set(v.GetX(), v.GetY(), v.GetZ());
-    part.worldAngularVelocity.set(w.GetX(), w.GetY(), w.GetZ());
+    part.worldPosition.copy(position);
+    part.worldRotation.copy(rotation);
+    part.worldVelocity.copy(linearVelocity);
+    part.worldAngularVelocity.copy(angularVelocity);
     totalMass += part.mass;
     rigCom.addScaledVector(part.worldPosition, part.mass);
     if (part.isDynamic) {
