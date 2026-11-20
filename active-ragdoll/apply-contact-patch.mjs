@@ -97,6 +97,17 @@ replaceOnce(
   'ragdoll body id'
 );
 
+replaceOnce(
+  '  descriptors.forEach((descriptor, index) => {',
+  `  if (new URLSearchParams(window.location.search).has('no-self-collision')) {
+    for (let a = 0; a < descriptors.length; a += 1) {
+      for (let b = a + 1; b < descriptors.length; b += 1) ragdollGroupFilter.DisableCollision(a, b);
+    }
+  }
+  descriptors.forEach((descriptor, index) => {`,
+  'A/B no self collision switch'
+);
+
 const oldGrounding = [
   '  // A foot is considered planted only while its sole is near the floor and',
   '  // its vertical speed is low. This is a lightweight contact estimator; the',
