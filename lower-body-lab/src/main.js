@@ -741,6 +741,7 @@ function updateBodyCache() {
     parts: parts.map(function (part) {
       return {
         name: part.name,
+        isDynamic: part.isDynamic,
         position: part.worldPosition.toArray(),
         velocity: part.worldVelocity.toArray(),
         rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
