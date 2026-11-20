@@ -582,11 +582,17 @@ function applyJointMuscleTorques() {
 
     const parentWj = bodyInterface.GetAngularVelocity(joint.parent.bodyId);
     const childWj = bodyInterface.GetAngularVelocity(joint.child.bodyId);
-    const relativeW = new THREE.Vector3(
-      childWj.GetX() - parentWj.GetX(),
-      childWj.GetY() - parentWj.GetY(),
-      childWj.GetZ() - parentWj.GetZ()
-    );
+    const childWorldW = new THREE.Vector3(childWj.GetX(), childWj.GetY(), childWj.GetZ());
+    const relativeW = childWorldW.clone().sub(new THREE.Vector3(
+      parentWj.GetX(),
+      parentWj.GetY(),
+      parentWj.GetZ()
+    ));
+    const usesWorldTarget = (joint.type === 'hip' && worldTargetMode.hip)
+      || (joint.type === 'ankle' && worldTargetMode.ankle);
+    // For a world-fixed target, its angular error derivative is the child's
+    // absolute world angular velocity, not velocity relative to the parent.
+    const dampingW = usesWorldTarget ? childWorldW : relativeW;
 
     let torque = new THREE.Vector3();
     if (joint.isHinge) {
@@ -611,7 +617,7 @@ function applyJointMuscleTorques() {
       const axis = sinHalf < 1e-6
         ? new THREE.Vector3()
         : new THREE.Vector3(errorQ.x / sinHalf, errorQ.y / sinHalf, errorQ.z / sinHalf);
-      torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(relativeW, -joint.baseKd * kdScale);
+      torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(dampingW, -joint.baseKd * kdScale);
 
       const requested = torque.length();
       const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
