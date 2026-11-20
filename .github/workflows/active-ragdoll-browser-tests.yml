@@ -29,7 +29,6 @@ jobs:
           cat active-ragdoll/src/main.js.gz.b64.part* | base64 --decode | gzip --decompress > active-ragdoll/src/main.js
           decode active-ragdoll/src/style.css.gz.b64 active-ragdoll/src/style.css
           decode active-ragdoll/src/control-math.js.gz.b64 active-ragdoll/src/control-math.js
-          decode active-ragdoll/test/headless.mjs.gz.b64 active-ragdoll/test/headless.mjs
           node --check active-ragdoll/src/main.js
           node --check active-ragdoll/test/headless.mjs
           test -s jolt-physics.wasm-compat.js
@@ -42,11 +41,11 @@ jobs:
       - name: Run real Jolt ragdoll regression
         working-directory: active-ragdoll
         run: npm run test:headless
-      - name: Upload reconstructed source and report inputs
+      - name: Upload reconstructed source and test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: active-ragdoll-headless-test-files
+          name: active-ragdoll-headless-test-report
           path: |
             active-ragdoll/src/main.js
             active-ragdoll/test/headless.mjs
