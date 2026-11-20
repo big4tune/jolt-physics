@@ -10,6 +10,7 @@ const PIN_FEET = QUERY.has('pin-feet');
 const DISABLE_SELF_COLLISIONS = QUERY.has('no-self-collision');
 const DISABLE_FLOOR_COLLISIONS = QUERY.has('no-floor-contact');
 const FOOT_START_GAP = Math.max(0, Math.min(0.08, Number(QUERY.get('foot-gap') || 0)));
+const PHYSICS_SUBSTEPS = Math.max(1, Math.min(8, Math.floor(Number(QUERY.get('substeps') || 1))));
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -800,7 +801,8 @@ function updateBodyCache() {
       selfCollisionsDisabled: DISABLE_SELF_COLLISIONS,
       floorCollisionsDisabled: DISABLE_FLOOR_COLLISIONS,
       footStartGap: FOOT_START_GAP,
-      pinnedFeet: PIN_FEET
+      pinnedFeet: PIN_FEET,
+      physicsSubsteps: PHYSICS_SUBSTEPS
     },
     pelvisY: pelvis.worldPosition.y,
     pelvisUp: pelvisUp,
@@ -863,10 +865,16 @@ function updateBodyCache() {
 }
 
 function stepFixedPhysics() {
-  updateWorldReferencedTargets();
-  updateRootUprightMoment();
-  applyJointMuscleTorques();
-  joltInterface.Step(FIXED_DT, 1);
+  // Re-evaluate the PD controller at every smaller physics step. Calling
+  // Jolt once with collisionSteps > 1 would subdivide contacts, but would
+  // leave the muscle torque frozen for the entire outer frame.
+  const substepDt = FIXED_DT / PHYSICS_SUBSTEPS;
+  for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep += 1) {
+    updateWorldReferencedTargets();
+    updateRootUprightMoment();
+    applyJointMuscleTorques();
+    joltInterface.Step(substepDt, 1);
+  }
   contactTrackingReady = true;
   testStepCount += 1;
 }
