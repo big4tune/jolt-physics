@@ -44,11 +44,13 @@ async function runScenario(page, options) {
     window.__lowerBodyTest.setJointTorqueSign('hip', config.signs?.hip ?? 1);
     window.__lowerBodyTest.setJointTorqueSign('knee', config.signs?.knee ?? 1);
     window.__lowerBodyTest.setJointTorqueSign('ankle', config.signs?.ankle ?? 1);
+    const delayRoot = Number(config.rootUprightDelaySeconds || 0) > 0;
     window.__lowerBodyTest.setRootUprightController(
-      config.rootUpright?.enabled ?? false,
+      !delayRoot && (config.rootUpright?.enabled ?? false),
       config.rootUpright?.sign ?? 1,
       config.rootUpright?.kp ?? 140,
-      config.rootUpright?.kd ?? 18
+      config.rootUpright?.kd ?? 18,
+      config.rootUpright?.maxMoment ?? 240
     );
     if (config.impulse) {
       window.__lowerBodyTest.applyImpulse('pelvis', config.impulse[0], config.impulse[1], config.impulse[2]);
@@ -60,8 +62,20 @@ async function runScenario(page, options) {
     let state = null;
     const chunks = Math.ceil(config.duration / 0.5);
     let lateImpulseApplied = false;
+    let delayedRootActivated = false;
     for (let i = 0; i < chunks; i += 1) {
       state = window.__lowerBodyTest.step(30);
+      if (config.rootUprightDelaySeconds && !delayedRootActivated && state.time >= config.rootUprightDelaySeconds) {
+        const root = config.rootUpright || {};
+        window.__lowerBodyTest.setRootUprightController(
+          root.enabled ?? true,
+          root.sign ?? 1,
+          root.kp ?? 140,
+          root.kd ?? 18,
+          root.maxMoment ?? 240
+        );
+        delayedRootActivated = true;
+      }
       if (config.impulseAtSeconds && !lateImpulseApplied && state.time >= config.impulseAtSeconds) {
         const impulse = config.lateImpulse || [0, 0, 0.8];
         window.__lowerBodyTest.applyImpulse('pelvis', impulse[0], impulse[1], impulse[2]);
@@ -169,6 +183,16 @@ try {
   const pinnedFeetRoot220_40_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 220, kd: 40 } });
   const pinnedFeetRoot300_60_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 300, kd: 60 } });
   const pinnedFeetRoot140_36_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 140, kd: 36 } });
+  const pinnedFeetRoot20_5_50_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 20, kd: 5, maxMoment: 50 } });
+  const pinnedFeetRoot35_8_70_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 35, kd: 8, maxMoment: 70 } });
+  const pinnedFeetRoot60_12_100_30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUpright: { enabled: true, kp: 60, kd: 12, maxMoment: 100 } });
+  const pinnedFeetRoot35_8_70Delayed30s = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 30, rootUprightDelaySeconds: 1.5, rootUpright: { enabled: true, kp: 35, kd: 8, maxMoment: 70 } });
+  const pinnedFeetRoot35_8_70Disturbance15s = await runScenario(pinnedPage, {
+    strength: 1, stiffness: 1, duration: 15,
+    rootUpright: { enabled: true, kp: 35, kd: 8, maxMoment: 70 },
+    impulseAtSeconds: 8,
+    lateImpulse: [0, 0, 0.8]
+  });
   const pinnedFeetRootImpulseAt5s = await runScenario(pinnedPage, {
     strength: 1,
     stiffness: 1,
@@ -179,7 +203,7 @@ try {
   });
   await pinnedPage.close();
 
-  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRootImpulseAt5s.final];
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRoot20_5_50_30s.final, pinnedFeetRoot35_8_70_30s.final, pinnedFeetRoot60_12_100_30s.final, pinnedFeetRoot35_8_70Delayed30s.final, pinnedFeetRoot35_8_70Disturbance15s.final, pinnedFeetRootImpulseAt5s.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -237,6 +261,11 @@ try {
       pinnedFeetRoot220_40_30s: pinnedFeetRoot220_40_30s,
       pinnedFeetRoot300_60_30s: pinnedFeetRoot300_60_30s,
       pinnedFeetRoot140_36_30s: pinnedFeetRoot140_36_30s,
+      pinnedFeetRoot20_5_50_30s: pinnedFeetRoot20_5_50_30s,
+      pinnedFeetRoot35_8_70_30s: pinnedFeetRoot35_8_70_30s,
+      pinnedFeetRoot60_12_100_30s: pinnedFeetRoot60_12_100_30s,
+      pinnedFeetRoot35_8_70Delayed30s: pinnedFeetRoot35_8_70Delayed30s,
+      pinnedFeetRoot35_8_70Disturbance15s: pinnedFeetRoot35_8_70Disturbance15s,
       pinnedFeetRootImpulseAt5s: pinnedFeetRootImpulseAt5s
     },
     browserErrors: errors
