@@ -425,6 +425,7 @@ function createLowerBody() {
       worldPosition: descriptor.position.clone(),
       worldRotation: descriptor.rotation.clone(),
       worldVelocity: new THREE.Vector3(),
+      worldAngularVelocity: new THREE.Vector3(),
       grounded: false
     };
     parts.push(part);
@@ -695,10 +696,12 @@ function updateBodyCache() {
     const p = bodyInterface.GetPosition(part.bodyId);
     const q = bodyInterface.GetRotation(part.bodyId);
     const v = bodyInterface.GetLinearVelocity(part.bodyId);
+    const w = bodyInterface.GetAngularVelocity(part.bodyId);
 
     part.worldPosition.set(p.GetX(), p.GetY(), p.GetZ());
     part.worldRotation.set(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
     part.worldVelocity.set(v.GetX(), v.GetY(), v.GetZ());
+    part.worldAngularVelocity.set(w.GetX(), w.GetY(), w.GetZ());
     totalMass += part.mass;
     rigCom.addScaledVector(part.worldPosition, part.mass);
     if (part.isDynamic) {
@@ -763,6 +766,7 @@ function updateBodyCache() {
         isKinematic: part.isKinematic,
         position: part.worldPosition.toArray(),
         velocity: part.worldVelocity.toArray(),
+        angularVelocity: part.worldAngularVelocity.toArray(),
         rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
         grounded: part.grounded
       };
