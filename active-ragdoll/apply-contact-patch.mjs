@@ -12,7 +12,7 @@ function replaceOnce(before, after, label) {
 
 replaceOnce(
   'let totalRagdollMass = 0;\nlet raycaster;',
-  \`let totalRagdollMass = 0;
+  `let totalRagdollMass = 0;
 let contactListener = null;
 let floorBodyKey = null;
 let contactTrackingReady = false;
@@ -21,13 +21,13 @@ const liveContactPairs = new Set();
 const floorContactFeet = new Set();
 const selfContactPairs = new Set();
 const contactEventStats = { added: 0, persisted: 0, removed: 0 };
-let raycaster;\`,
+let raycaster;`,
   'contact state'
 );
 
 replaceOnce(
   'function setupJolt() {',
-  \`function contactPairKey(a, b) {
+  `function contactPairKey(a, b) {
   return a < b ? (a + ':' + b) : (b + ':' + a);
 }
 
@@ -74,7 +74,7 @@ function installJoltContactListener() {
   physicsSystem.SetContactListener(contactListener);
 }
 
-function setupJolt() {\`,
+function setupJolt() {`,
   'listener helper'
 );
 
@@ -111,9 +111,9 @@ replaceOnce(oldGrounding, newGrounding, 'contact measurement header');
 
 replaceOnce(
   '    foot.grounded = foot.bottomY < 0.035 && Math.abs(v.y) < 0.75;',
-  \`    foot.grounded = contactTrackingReady
+  `    foot.grounded = contactTrackingReady
       ? floorContactFeet.has(foot.name)
-      : foot.bottomY < 0.035 && Math.abs(v.y) < 0.75;\`,
+      : foot.bottomY < 0.035 && Math.abs(v.y) < 0.75;`,
   'contact based grounded'
 );
 
@@ -125,7 +125,7 @@ replaceOnce(
 
 replaceOnce(
   '    torque: { ...torqueStats },\n    parts: ragdollParts.map((part) => ({',
-  \`    torque: { ...torqueStats },
+  `    torque: { ...torqueStats },
     contacts: {
       trackingReady: contactTrackingReady,
       groundedFeet: [...floorContactFeet],
@@ -144,7 +144,7 @@ replaceOnce(
       target: balanceAI.step.target.toArray(),
     } : null,
     totalMass: totalRagdollMass,
-    parts: ragdollParts.map((part) => ({\`,
+    parts: ragdollParts.map((part) => ({`,
   'contact telemetry'
 );
 
