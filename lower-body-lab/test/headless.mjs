@@ -31,6 +31,71 @@ async function openLab(query = '') {
   return page;
 }
 
+async function captureStartup(page, config = {}) {
+  await page.evaluate(options => {
+    const api = window.__lowerBodyTest;
+    api.reset();
+    api.setMuscleStrength(options.strength ?? 1);
+    api.setStiffness(options.stiffness ?? 1);
+    api.setWorldTargetMode('hip', false);
+    api.setWorldTargetMode('ankle', false);
+    api.setJointTorqueScale('hip', options.scales?.hip ?? 1);
+    api.setJointTorqueScale('knee', options.scales?.knee ?? 1);
+    api.setJointTorqueScale('ankle', options.scales?.ankle ?? 1);
+    api.setRootUprightController(false, 1, 35, 8, 70);
+  }, config);
+
+  return page.evaluate(() => {
+    const rows = [];
+    for (let frame = 1; frame <= 60; frame += 1) {
+      const state = window.__lowerBodyTest.step(1);
+      if (frame <= 12 || frame % 3 === 0) {
+        const pelvis = state.parts.find(part => part.name === 'pelvis');
+        const feet = state.parts.filter(part => part.name.startsWith('foot_'));
+        const shins = state.parts.filter(part => part.name.startsWith('shin_'));
+        rows.push({
+          frame,
+          time: state.time,
+          pelvisY: state.pelvisY,
+          pelvisUp: state.pelvisUp,
+          com: state.com,
+          comVelocity: state.comVelocity,
+          pelvisVelocity: pelvis.velocity,
+          pelvisAngularVelocity: pelvis.angularVelocity,
+          feet: feet.map(part => ({
+            name: part.name,
+            position: part.position,
+            velocity: part.velocity,
+            angularVelocity: part.angularVelocity,
+            rotation: part.rotation,
+            grounded: part.grounded
+          })),
+          shins: shins.map(part => ({
+            name: part.name,
+            position: part.position,
+            rotation: part.rotation,
+            angularVelocity: part.angularVelocity
+          })),
+          joints: state.joints.map(joint => ({
+            key: joint.key,
+            type: joint.type,
+            error: joint.error,
+            requestedTorque: joint.requestedTorque,
+            appliedTorque: joint.appliedTorque,
+            parentRotation: joint.parentRotation,
+            childRotation: joint.childRotation,
+            targetRelative: joint.targetRelative,
+            currentRelative: joint.currentRelative
+          })),
+          contacts: state.contactEvents,
+          selfContacts: state.selfContacts
+        });
+      }
+    }
+    return rows;
+  });
+}
+
 async function runScenario(page, options) {
   await page.evaluate(config => {
     window.__lowerBodyTest.reset();
@@ -132,30 +197,23 @@ try {
   const anchorError = await page.evaluate(() => window.__lowerBodyAnchorError);
   assert.ok(Number.isFinite(anchorError), 'Anchor validation must run');
 
-  const startupTrace = await page.evaluate(() => {
-    window.__lowerBodyTest.reset();
-    window.__lowerBodyTest.setMuscleStrength(1);
-    window.__lowerBodyTest.setStiffness(1);
-    const rows = [];
-    let state = null;
-    for (let i = 0; i < 90; i += 6) {
-      state = window.__lowerBodyTest.step(6);
-      rows.push({
-        time: state.time,
-        pelvisY: state.pelvisY,
-        pelvisUp: state.pelvisUp,
-        com: state.com,
-        comVelocity: state.comVelocity,
-        feet: state.feet,
-        selfContacts: state.selfContacts,
-        contactEvents: state.contactEvents,
-        torque: state.torque,
-        parts: state.parts,
-        joints: state.joints
-      });
-    }
-    return rows;
-  });
+  const startupTrace = await captureStartup(page, { strength: 1 });
+  const passiveStartupTrace = await captureStartup(page, { strength: 0 });
+  const ankleOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 0, knee: 0, ankle: 1 } });
+  const kneeOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 0, knee: 1, ankle: 0 } });
+  const hipOnlyStartupTrace = await captureStartup(page, { strength: 1, scales: { hip: 1, knee: 0, ankle: 0 } });
+
+  const noSelfPage = await openLab('&no-self-collision=1');
+  const noSelfStartupTrace = await captureStartup(noSelfPage, { strength: 1 });
+  await noSelfPage.close();
+
+  const noFloorPage = await openLab('&no-floor-contact=1');
+  const noFloorStartupTrace = await captureStartup(noFloorPage, { strength: 1 });
+  await noFloorPage.close();
+
+  const footGapPage = await openLab('&foot-gap=0.025');
+  const footGapStartupTrace = await captureStartup(footGapPage, { strength: 1 });
+  await footGapPage.close();
 
   const passive = await runScenario(page, { strength: 0, stiffness: 1, duration: 5 });
   const baseline = await runScenario(page, { strength: 1, stiffness: 1, duration: 30 });
@@ -222,10 +280,12 @@ try {
       initialPelvisY: initial.pelvisY,
       initialPelvisUp: initial.pelvisUp,
       anchorError: await page.evaluate(() => window.__lowerBodyAnchorError),
+      collisionDiagnostics: initial.collisionDiagnostics,
       initialParts: initial.parts.map(part => ({
         name: part.name,
         isDynamic: part.isDynamic,
-        position: part.position
+        position: part.position,
+        rotation: part.rotation
       })),
       pinnedFeetModel: pinnedInitial.parts.filter(part => part.name.startsWith('foot_')).map(part => ({
         name: part.name,
@@ -239,6 +299,16 @@ try {
         min: joint.min,
         max: joint.max
       }))
+    },
+    startupDiagnostics: {
+      baselineFullMuscles: startupTrace,
+      passiveNoMuscles: passiveStartupTrace,
+      ankleOnly: ankleOnlyStartupTrace,
+      kneeOnly: kneeOnlyStartupTrace,
+      hipOnly: hipOnlyStartupTrace,
+      noSelfCollisions: noSelfStartupTrace,
+      noFloorContact: noFloorStartupTrace,
+      footStartGap25mm: footGapStartupTrace
     },
     startupTrace: startupTrace,
     scenarios: {
