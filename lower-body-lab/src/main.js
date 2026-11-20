@@ -520,8 +520,14 @@ function validateInitialAnchors(jointDefs) {
 
   for (const joint of joints) {
     const def = byName.get(joint.key);
-    const pA = joint.parent.initialPosition.clone().add(new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2]).sub(joint.parent.initialPosition).applyQuaternion(joint.parent.initialRotation));
-    const pB = joint.child.initialPosition.clone().add(new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2]).sub(joint.child.initialPosition).applyQuaternion(joint.child.initialRotation));
+    const localA = new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2])
+      .sub(joint.parent.initialPosition)
+      .applyQuaternion(joint.parent.initialRotation.clone().invert());
+    const localB = new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2])
+      .sub(joint.child.initialPosition)
+      .applyQuaternion(joint.child.initialRotation.clone().invert());
+    const pA = joint.parent.initialPosition.clone().add(localA.applyQuaternion(joint.parent.initialRotation));
+    const pB = joint.child.initialPosition.clone().add(localB.applyQuaternion(joint.child.initialRotation));
     maximum = Math.max(maximum, pA.distanceTo(pB));
   }
   if (maximum > 0.001) throw new Error('Initial joint anchor mismatch: ' + maximum);
