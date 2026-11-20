@@ -5,6 +5,7 @@ import './style.css';
 
 const FIXED_DT = 1 / 60;
 const TEST_MODE = new URLSearchParams(window.location.search).get('test') === '1';
+const PIN_FEET = new URLSearchParams(window.location.search).has('pin-feet');
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -378,11 +379,14 @@ function createLowerBody() {
     const shape = createJoltShape(descriptor);
     const position = makeJoltRVec3(descriptor.position.x, descriptor.position.y, descriptor.position.z);
     const rotation = makeJoltQuat(descriptor.rotation);
+    const motionType = PIN_FEET && descriptor.group === 'feet'
+      ? Jolt.EMotionType_Kinematic
+      : Jolt.EMotionType_Dynamic;
     const settings = new Jolt.BodyCreationSettings(
       shape,
       position,
       rotation,
-      Jolt.EMotionType_Dynamic,
+      motionType,
       LAYER_MOVING
     );
 
@@ -410,6 +414,7 @@ function createLowerBody() {
     const part = {
       name: descriptor.name,
       mass: descriptor.mass,
+      isDynamic: motionType === Jolt.EMotionType_Dynamic,
       descriptor: descriptor,
       body: body,
       bodyId: bodyId,
@@ -546,8 +551,8 @@ function addTorquePair(joint, torque) {
   if (torque.lengthSq() < 1e-10) return;
   const childTorque = makeJoltVec3(torque.x, torque.y, torque.z);
   const parentTorque = makeJoltVec3(-torque.x, -torque.y, -torque.z);
-  bodyInterface.AddTorque(joint.child.bodyId, childTorque, Jolt.EActivation_Activate);
-  bodyInterface.AddTorque(joint.parent.bodyId, parentTorque, Jolt.EActivation_Activate);
+  if (joint.child.isDynamic) bodyInterface.AddTorque(joint.child.bodyId, childTorque, Jolt.EActivation_Activate);
+  if (joint.parent.isDynamic) bodyInterface.AddTorque(joint.parent.bodyId, parentTorque, Jolt.EActivation_Activate);
   Jolt.destroy(childTorque);
   Jolt.destroy(parentTorque);
   torqueStats.active += 1;
@@ -772,8 +777,10 @@ function resetSimulation() {
     const rot = makeJoltQuat(part.initialRotation);
     const zero = makeJoltVec3(0, 0, 0);
     bodyInterface.SetPositionAndRotation(part.bodyId, pos, rot, Jolt.EActivation_Activate);
-    bodyInterface.SetLinearVelocity(part.bodyId, zero);
-    bodyInterface.SetAngularVelocity(part.bodyId, zero);
+    if (part.isDynamic) {
+      bodyInterface.SetLinearVelocity(part.bodyId, zero);
+      bodyInterface.SetAngularVelocity(part.bodyId, zero);
+    }
     Jolt.destroy(pos);
     Jolt.destroy(rot);
     Jolt.destroy(zero);
