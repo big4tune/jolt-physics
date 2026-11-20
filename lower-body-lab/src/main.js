@@ -57,6 +57,7 @@ const selfContactPairs = new Set();
 const contactEventStats = { added: 0, persisted: 0, removed: 0 };
 const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
 const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
+const jointTorqueSign = { hip: 1, knee: 1, ankle: 1 };
 const worldTargetMode = { hip: false, ankle: false };
 const torqueChildJolt = null;
 const torqueParentJolt = null;
@@ -624,6 +625,7 @@ function applyJointMuscleTorques() {
       }
     }
 
+    torque.multiplyScalar(jointTorqueSign[joint.type]);
     torqueStats.maxRequested = Math.max(torqueStats.maxRequested, joint.requestedTorque);
     torqueStats.maxApplied = Math.max(torqueStats.maxApplied, joint.appliedTorque);
     addTorquePair(joint, torque);
@@ -792,6 +794,10 @@ function installTestHooks() {
     setJointTorqueScale: function (type, value) {
       if (!Object.prototype.hasOwnProperty.call(jointTorqueScale, type)) throw new Error('Unknown joint type: ' + type);
       jointTorqueScale[type] = Math.max(0, Math.min(1, Number(value)));
+    },
+    setJointTorqueSign: function (type, value) {
+      if (!Object.prototype.hasOwnProperty.call(jointTorqueSign, type)) throw new Error('Unknown joint type: ' + type);
+      jointTorqueSign[type] = Number(value) < 0 ? -1 : 1;
     },
     applyImpulse: applyImpulse,
     anchorError: window.__lowerBodyAnchorError
