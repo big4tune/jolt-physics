@@ -233,7 +233,11 @@ replaceOnce(
 
 replaceOnce(
   '      requestedTorque: joint.requestedTorque ?? 0,',
-  '      requestedTorque: joint.requestedTorque ?? 0,\\n      springTorque: joint.springTorque ?? 0,\\n      dampingTorque: joint.dampingTorque ?? 0,\\n      orientationErrorAngle: joint.orientationErrorAngle ?? 0,\\n      relativeAngularSpeed: joint.relativeAngularSpeed ?? 0,',
+  `      requestedTorque: joint.requestedTorque ?? 0,
+      springTorque: joint.springTorque ?? 0,
+      dampingTorque: joint.dampingTorque ?? 0,
+      orientationErrorAngle: joint.orientationErrorAngle ?? 0,
+      relativeAngularSpeed: joint.relativeAngularSpeed ?? 0,`,
   'snapshot spring damping and velocity telemetry'
 );
 
