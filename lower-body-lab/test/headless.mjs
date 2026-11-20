@@ -89,7 +89,8 @@ try {
   assert.equal(initial.parts.length, 7, 'Expected exactly 7 rigid bodies');
   assert.equal(initial.joints.length, 6, 'Expected exactly 6 joints');
   assert.ok(Number.isFinite(initial.pelvisY), 'Initial pelvis height must be finite');
-  assert.ok(window.__lowerBodyAnchorError === undefined || Number.isFinite(window.__lowerBodyAnchorError), 'Anchor validation must run');
+  const anchorError = await page.evaluate(() => window.__lowerBodyAnchorError);
+  assert.ok(Number.isFinite(anchorError), 'Anchor validation must run');
 
   const passive = await runScenario(page, { strength: 0, stiffness: 1, duration: 5 });
   const baseline = await runScenario(page, { strength: 1, stiffness: 1, duration: 30 });
