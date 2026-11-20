@@ -29,7 +29,7 @@ jobs:
           cat active-ragdoll/src/main.js.gz.b64.part* | base64 --decode | gzip --decompress > active-ragdoll/src/main.js
           decode active-ragdoll/src/style.css.gz.b64 active-ragdoll/src/style.css
           decode active-ragdoll/src/control-math.js.gz.b64 active-ragdoll/src/control-math.js
-          patch -d active-ragdoll/src -p0 < active-ragdoll-contact.patch
+          node active-ragdoll/apply-contact-patch.mjs
           node --check active-ragdoll/src/main.js
           node --check active-ragdoll/test/headless.mjs
           test -s jolt-physics.wasm-compat.js
