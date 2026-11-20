@@ -154,9 +154,22 @@ replaceOnce(
 );
 
 replaceOnce(
+  '    torqueStats.maxRequested = Math.max(torqueStats.maxRequested, Math.abs(requestedTorque));',
+  '    joint.requestedTorque = requestedTorque;\n    torqueStats.maxRequested = Math.max(torqueStats.maxRequested, Math.abs(requestedTorque));',
+  'store requested torque on joint'
+);
+
+replaceOnce(
   '      torque: joint.appliedTorque ?? 0,',
-  '      torque: joint.appliedTorque ?? 0,\n      requestedTorque: joint.requestedTorque ?? 0,',
-  'requested torque telemetry'
+  `      torque: joint.appliedTorque ?? 0,
+      requestedTorque: joint.requestedTorque ?? 0,
+      targetRelative: joint.targetRelative.toArray(),
+      relativeErrorRad: (() => {
+        const desired = joint.parent.worldRotation.clone().multiply(joint.targetRelative);
+        const error = desired.multiply(joint.child.worldRotation.clone().invert()).normalize();
+        return 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(error.w), -1, 1));
+      })(),`,
+  'requested torque and relative angle telemetry'
 );
 
 replaceOnce(
