@@ -13,13 +13,13 @@ const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host
 const errors = [];
 let browser;
 
-async function openLab() {
+async function openLab(query = '') {
   const page = await browser.newPage();
   page.on('pageerror', error => errors.push(String(error)));
   page.on('console', message => {
     if (message.type() === 'error') errors.push(message.text());
   });
-  await page.goto('http://127.0.0.1:4180/?test=1', { waitUntil: 'networkidle' });
+  await page.goto('http://127.0.0.1:4180/?test=1' + query, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => !!window.__lowerBodyTest || !!document.querySelector('#error-overlay')?.textContent.trim(), {
     timeout: 30000
   });
@@ -150,7 +150,13 @@ try {
   const rootUprightPlusAnkle15s = await runScenario(page, { strength: 1, stiffness: 1, duration: 15, rootUpright: { enabled: true }, worldTargets: { ankle: true } });
   const impulse = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, impulse: [0, 0, 0.8] });
 
-  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final];
+  const pinnedPage = await openLab('&pin-feet=1');
+  const pinnedInitial = await pinnedPage.evaluate(() => window.__lowerBodyTest.snapshot());
+  const pinnedFeetBaseline = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 15 });
+  const pinnedFeetRootUpright = await runScenario(pinnedPage, { strength: 1, stiffness: 1, duration: 15, rootUpright: { enabled: true, kp: 220, kd: 24 } });
+  await pinnedPage.close();
+
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -167,7 +173,12 @@ try {
       anchorError: await page.evaluate(() => window.__lowerBodyAnchorError),
       initialParts: initial.parts.map(part => ({
         name: part.name,
+        isDynamic: part.isDynamic,
         position: part.position
+      })),
+      pinnedFeetModel: pinnedInitial.parts.filter(part => part.name.startsWith('foot_')).map(part => ({
+        name: part.name,
+        isDynamic: part.isDynamic
       })),
       initialJoints: initial.joints.map(joint => ({
         key: joint.key,
@@ -196,7 +207,9 @@ try {
       rootUprightReversed8s: rootUprightReversed8s,
       rootUprightStrong15s: rootUprightStrong15s,
       rootUprightPlusAnkle15s: rootUprightPlusAnkle15s,
-      pelvisImpulse08_8s: impulse
+      pelvisImpulse08_8s: impulse,
+      pinnedFeetBaseline15s: pinnedFeetBaseline,
+      pinnedFeetRootUpright15s: pinnedFeetRootUpright
     },
     browserErrors: errors
   };
