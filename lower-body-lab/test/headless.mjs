@@ -36,6 +36,9 @@ async function runScenario(page, options) {
     window.__lowerBodyTest.reset();
     window.__lowerBodyTest.setMuscleStrength(config.strength);
     window.__lowerBodyTest.setStiffness(config.stiffness);
+    window.__lowerBodyTest.setJointTorqueScale('hip', config.scales?.hip ?? 1);
+    window.__lowerBodyTest.setJointTorqueScale('knee', config.scales?.knee ?? 1);
+    window.__lowerBodyTest.setJointTorqueScale('ankle', config.scales?.ankle ?? 1);
     if (config.impulse) {
       window.__lowerBodyTest.applyImpulse('pelvis', config.impulse[0], config.impulse[1], config.impulse[2]);
     }
@@ -92,12 +95,40 @@ try {
   const anchorError = await page.evaluate(() => window.__lowerBodyAnchorError);
   assert.ok(Number.isFinite(anchorError), 'Anchor validation must run');
 
+  const startupTrace = await page.evaluate(() => {
+    window.__lowerBodyTest.reset();
+    window.__lowerBodyTest.setMuscleStrength(1);
+    window.__lowerBodyTest.setStiffness(1);
+    const rows = [];
+    let state = null;
+    for (let i = 0; i < 90; i += 6) {
+      state = window.__lowerBodyTest.step(6);
+      rows.push({
+        time: state.time,
+        pelvisY: state.pelvisY,
+        pelvisUp: state.pelvisUp,
+        com: state.com,
+        comVelocity: state.comVelocity,
+        feet: state.feet,
+        selfContacts: state.selfContacts,
+        contactEvents: state.contactEvents,
+        torque: state.torque,
+        parts: state.parts,
+        joints: state.joints
+      });
+    }
+    return rows;
+  });
+
   const passive = await runScenario(page, { strength: 0, stiffness: 1, duration: 5 });
   const baseline = await runScenario(page, { strength: 1, stiffness: 1, duration: 30 });
   const stronger = await runScenario(page, { strength: 1.6, stiffness: 1, duration: 20 });
+  const hipDisabled = await runScenario(page, { strength: 1, stiffness: 1, duration: 4, scales: { hip: 0, knee: 1, ankle: 1 } });
+  const kneeDisabled = await runScenario(page, { strength: 1, stiffness: 1, duration: 4, scales: { hip: 1, knee: 0, ankle: 1 } });
+  const ankleDisabled = await runScenario(page, { strength: 1, stiffness: 1, duration: 4, scales: { hip: 1, knee: 1, ankle: 0 } });
   const impulse = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, impulse: [0, 0, 0.8] });
 
-  const finalStates = [passive.final, baseline.final, stronger.final, impulse.final];
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, impulse.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -124,10 +155,14 @@ try {
         max: joint.max
       }))
     },
+    startupTrace: startupTrace,
     scenarios: {
       passive5s: passive,
       baseline30s: baseline,
       strength160_20s: stronger,
+      hipDisabled4s: hipDisabled,
+      kneeDisabled4s: kneeDisabled,
+      ankleDisabled4s: ankleDisabled,
       pelvisImpulse08_8s: impulse
     },
     browserErrors: errors
