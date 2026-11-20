@@ -41,6 +41,27 @@ try {
   }
   console.log('STARTUP_TRACE=' + JSON.stringify(startupTrace));
 
+  // A/B isolate: same initial pose and controller, all self-collision pairs disabled.
+  const noCollisionPage = await browser.newPage();
+  noCollisionPage.on('pageerror', e => errors.push(String(e)));
+  noCollisionPage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await noCollisionPage.goto('http://127.0.0.1:4173/?test=1&no-self-collision=1', { waitUntil: 'networkidle' });
+  await noCollisionPage.waitForFunction(() => !!window.__ragdollTest, { timeout: 30000 });
+  const noCollisionInitial = await noCollisionPage.evaluate(() => window.__ragdollTest.snapshot());
+  const noCollisionTrace = [];
+  for (let i = 0; i < 10; i++) {
+    const s = await noCollisionPage.evaluate(() => window.__ragdollTest.step(12));
+    noCollisionTrace.push({
+      time:s.time, uprightness:s.uprightness, pelvisY:s.pelvisY, torsoY:s.torsoY,
+      com:s.com, comVelocity:s.comVelocity, groundedFeet:s.contacts?.groundedFeet,
+      selfPairs:s.contacts?.selfPairs, selfContactEvents:s.contacts?.events,
+      action:s.action, stepPlan:s.stepPlan
+    });
+  }
+  console.log('NO_SELF_COLLISION_INITIAL=' + JSON.stringify(noCollisionInitial));
+  console.log('NO_SELF_COLLISION_TRACE=' + JSON.stringify(noCollisionTrace));
+  await noCollisionPage.close();
+
   const pairs = await page.evaluate(() => ({
     footShin: window.__ragdollTest.collisionFilterEnabled(0,1),
     footHead: window.__ragdollTest.collisionFilterEnabled(0,12),
