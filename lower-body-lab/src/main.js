@@ -531,6 +531,7 @@ function createLowerBody() {
       appliedTorque: 0,
       requestedTorque: 0,
       orientationError: 0,
+      lastServoInput: null,
       extraWorldTorque: new THREE.Vector3()
     };
     joints.push(joint);
@@ -572,6 +573,20 @@ function addTorquePair(joint, torque) {
   Jolt.destroy(childTorque);
   Jolt.destroy(parentTorque);
   torqueStats.active += 1;
+}
+
+function rebaseJointTargets(type = null) {
+  for (const joint of joints) {
+    if (type && joint.type !== type) continue;
+    const parentQj = bodyInterface.GetRotation(joint.parent.bodyId);
+    const childQj = bodyInterface.GetRotation(joint.child.bodyId);
+    const parentQ = new THREE.Quaternion(parentQj.GetX(), parentQj.GetY(), parentQj.GetZ(), parentQj.GetW());
+    const childQ = new THREE.Quaternion(childQj.GetX(), childQj.GetY(), childQj.GetZ(), childQj.GetW());
+    const relative = parentQ.clone().invert().multiply(childQ).normalize();
+    joint.defaultRelative.copy(relative);
+    joint.targetRelative.copy(relative);
+    if (joint.isHinge) joint.targetHingeAngle = joint.constraint.GetCurrentAngle();
+  }
 }
 
 function updateWorldReferencedTargets() {
@@ -680,6 +695,15 @@ function applyJointMuscleTorques() {
       const axis = sinHalf < 1e-6
         ? new THREE.Vector3()
         : new THREE.Vector3(errorQ.x / sinHalf, errorQ.y / sinHalf, errorQ.z / sinHalf);
+      joint.lastServoInput = {
+        parentRotation: [parentQ.x, parentQ.y, parentQ.z, parentQ.w],
+        childRotation: [childQ.x, childQ.y, childQ.z, childQ.w],
+        targetRelative: [joint.targetRelative.x, joint.targetRelative.y, joint.targetRelative.z, joint.targetRelative.w],
+        desiredChild: [desiredChild.x, desiredChild.y, desiredChild.z, desiredChild.w],
+        errorRotation: [errorQ.x, errorQ.y, errorQ.z, errorQ.w],
+        errorAngle: angle,
+        dampingVelocity: dampingW.toArray()
+      };
       torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(dampingW, -joint.baseKd * kdScale).add(joint.extraWorldTorque);
 
       const requested = torque.length();
@@ -806,6 +830,13 @@ function updateBodyCache() {
         error: joint.orientationError,
         requestedTorque: joint.requestedTorque,
         appliedTorque: joint.appliedTorque,
+        measuredError: (() => {
+          const desired = joint.parent.worldRotation.clone().multiply(joint.targetRelative);
+          const errorQ = desired.multiply(joint.child.worldRotation.clone().invert()).normalize();
+          if (errorQ.w < 0) errorQ.set(-errorQ.x, -errorQ.y, -errorQ.z, -errorQ.w);
+          return 2 * Math.acos(THREE.MathUtils.clamp(errorQ.w, -1, 1));
+        })(),
+        lastServoInput: joint.lastServoInput,
         parentRotation: joint.parent.worldRotation.toArray(),
         childRotation: joint.child.worldRotation.toArray(),
         targetRelative: [joint.targetRelative.x, joint.targetRelative.y, joint.targetRelative.z, joint.targetRelative.w],
@@ -850,6 +881,12 @@ function resetSimulation() {
   torqueStats.maxApplied = 0;
   torqueStats.saturated = 0;
   torqueStats.active = 0;
+  for (const joint of joints) {
+    joint.orientationError = 0;
+    joint.requestedTorque = 0;
+    joint.appliedTorque = 0;
+    joint.lastServoInput = null;
+  }
   testStepCount = 0;
 }
 
@@ -912,6 +949,7 @@ function installTestHooks() {
       if (Number.isFinite(Number(kd))) rootUprightKd = Math.max(0, Math.min(80, Number(kd)));
       if (Number.isFinite(Number(maxMoment))) rootUprightMaxMoment = Math.max(0, Math.min(400, Number(maxMoment)));
     },
+    rebaseJointTargets: rebaseJointTargets,
     applyImpulse: applyImpulse,
     anchorError: window.__lowerBodyAnchorError
   };
