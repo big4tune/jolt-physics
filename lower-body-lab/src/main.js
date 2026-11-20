@@ -415,6 +415,7 @@ function createLowerBody() {
       name: descriptor.name,
       mass: descriptor.mass,
       isDynamic: motionType === Jolt.EMotionType_Dynamic,
+      isKinematic: motionType === Jolt.EMotionType_Kinematic,
       descriptor: descriptor,
       body: body,
       bodyId: bodyId,
@@ -684,8 +685,10 @@ function applyJointMuscleTorques() {
 
 function updateBodyCache() {
   let totalMass = 0;
+  let dynamicMass = 0;
   const com = new THREE.Vector3();
   const comVelocity = new THREE.Vector3();
+  const rigCom = new THREE.Vector3();
   refreshContactMetadata();
 
   for (const part of parts) {
@@ -697,16 +700,23 @@ function updateBodyCache() {
     part.worldRotation.set(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
     part.worldVelocity.set(v.GetX(), v.GetY(), v.GetZ());
     totalMass += part.mass;
-    com.addScaledVector(part.worldPosition, part.mass);
-    comVelocity.addScaledVector(part.worldVelocity, part.mass);
+    rigCom.addScaledVector(part.worldPosition, part.mass);
+    if (part.isDynamic) {
+      dynamicMass += part.mass;
+      com.addScaledVector(part.worldPosition, part.mass);
+      comVelocity.addScaledVector(part.worldVelocity, part.mass);
+    }
 
     const mesh = part.mesh;
     mesh.position.copy(part.worldPosition);
     mesh.quaternion.copy(part.worldRotation);
   }
 
-  com.multiplyScalar(1 / Math.max(totalMass, 1e-6));
-  comVelocity.multiplyScalar(1 / Math.max(totalMass, 1e-6));
+  // COM and COM velocity describe the simulated dynamic bodies only. Kinematic
+  // feet are external anchors, not inertial mass in this diagnostic mode.
+  com.multiplyScalar(1 / Math.max(dynamicMass, 1e-6));
+  comVelocity.multiplyScalar(1 / Math.max(dynamicMass, 1e-6));
+  rigCom.multiplyScalar(1 / Math.max(totalMass, 1e-6));
 
   const pelvis = partByName.get('pelvis');
   const pelvisUp = WORLD_UP.clone().applyQuaternion(pelvis.worldRotation).dot(WORLD_UP);
@@ -729,10 +739,18 @@ function updateBodyCache() {
     step: testStepCount,
     time: testStepCount * FIXED_DT,
     totalMass: totalMass,
+    dynamicMass: dynamicMass,
     pelvisY: pelvis.worldPosition.y,
     pelvisUp: pelvisUp,
     com: com.toArray(),
+    rigCom: rigCom.toArray(),
     comVelocity: comVelocity.toArray(),
+    rootUpright: {
+      enabled: rootUprightEnabled,
+      kp: rootUprightKp,
+      kd: rootUprightKd,
+      sign: rootUprightSign
+    },
     groundedFeet: feet.filter(function (foot) { return foot.grounded; }).map(function (foot) { return foot.name; }),
     feet: feet,
     selfContacts: Array.from(selfContactPairs),
@@ -742,6 +760,7 @@ function updateBodyCache() {
       return {
         name: part.name,
         isDynamic: part.isDynamic,
+        isKinematic: part.isKinematic,
         position: part.worldPosition.toArray(),
         velocity: part.worldVelocity.toArray(),
         rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
