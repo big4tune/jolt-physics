@@ -44,6 +44,12 @@ async function runScenario(page, options) {
     window.__lowerBodyTest.setJointTorqueSign('hip', config.signs?.hip ?? 1);
     window.__lowerBodyTest.setJointTorqueSign('knee', config.signs?.knee ?? 1);
     window.__lowerBodyTest.setJointTorqueSign('ankle', config.signs?.ankle ?? 1);
+    window.__lowerBodyTest.setRootUprightController(
+      config.rootUpright?.enabled ?? false,
+      config.rootUpright?.sign ?? 1,
+      config.rootUpright?.kp ?? 140,
+      config.rootUpright?.kd ?? 18
+    );
     if (config.impulse) {
       window.__lowerBodyTest.applyImpulse('pelvis', config.impulse[0], config.impulse[1], config.impulse[2]);
     }
@@ -138,9 +144,13 @@ try {
   const ankleWorldTargetReversed = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, worldTargets: { ankle: true }, signs: { hip: 1, knee: 1, ankle: -1 } });
   const hipAnkleWorldTargetReversedHip = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, worldTargets: { hip: true, ankle: true }, signs: { hip: -1, knee: 1, ankle: 1 } });
   const hipAnkleWorldTargetReversedBoth = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, worldTargets: { hip: true, ankle: true }, signs: { hip: -1, knee: 1, ankle: -1 } });
+  const rootUpright15s = await runScenario(page, { strength: 1, stiffness: 1, duration: 15, rootUpright: { enabled: true } });
+  const rootUprightReversed8s = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, rootUpright: { enabled: true, sign: -1 } });
+  const rootUprightStrong15s = await runScenario(page, { strength: 1, stiffness: 1, duration: 15, rootUpright: { enabled: true, kp: 220, kd: 24 } });
+  const rootUprightPlusAnkle15s = await runScenario(page, { strength: 1, stiffness: 1, duration: 15, rootUpright: { enabled: true }, worldTargets: { ankle: true } });
   const impulse = await runScenario(page, { strength: 1, stiffness: 1, duration: 8, impulse: [0, 0, 0.8] });
 
-  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, impulse.final];
+  const finalStates = [passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -182,6 +192,10 @@ try {
       ankleWorldTargetReversed8s: ankleWorldTargetReversed,
       hipAnkleWorldTargetReversedHip8s: hipAnkleWorldTargetReversedHip,
       hipAnkleWorldTargetReversedBoth8s: hipAnkleWorldTargetReversedBoth,
+      rootUpright15s: rootUpright15s,
+      rootUprightReversed8s: rootUprightReversed8s,
+      rootUprightStrong15s: rootUprightStrong15s,
+      rootUprightPlusAnkle15s: rootUprightPlusAnkle15s,
       pelvisImpulse08_8s: impulse
     },
     browserErrors: errors
