@@ -52,6 +52,7 @@ function refreshContactMetadata() {
 
 function installJoltContactListener() {
   contactListener = new Jolt.ContactListenerJS();
+  contactListener.OnContactValidate = () => Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
   const setPair = (body1Pointer, body2Pointer, active, kind) => {
     const body1 = Jolt.wrapPointer(body1Pointer, Jolt.Body);
     const body2 = Jolt.wrapPointer(body2Pointer, Jolt.Body);
