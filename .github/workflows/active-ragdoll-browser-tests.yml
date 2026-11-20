@@ -1,0 +1,53 @@
+name: Active Ragdoll physics regression
+
+on:
+  push:
+    branches:
+      - ci/active-ragdoll-browser-tests
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  headless-physics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Restore project source from compressed transport files
+        shell: bash
+        run: |
+          set -euo pipefail
+          decode() {
+            base64 --decode "$1" | gzip --decompress > "$2"
+          }
+          decode active-ragdoll/index.html.gz.b64 active-ragdoll/index.html
+          cat active-ragdoll/src/main.js.gz.b64.part* | base64 --decode | gzip --decompress > active-ragdoll/src/main.js
+          decode active-ragdoll/src/style.css.gz.b64 active-ragdoll/src/style.css
+          decode active-ragdoll/src/control-math.js.gz.b64 active-ragdoll/src/control-math.js
+          decode active-ragdoll/test/headless.mjs.gz.b64 active-ragdoll/test/headless.mjs
+          node --check active-ragdoll/src/main.js
+          node --check active-ragdoll/test/headless.mjs
+          test -s jolt-physics.wasm-compat.js
+      - name: Install Three.js, Vite and Playwright
+        working-directory: active-ragdoll
+        run: npm install --no-audit --no-fund
+      - name: Install headless Chromium
+        working-directory: active-ragdoll
+        run: npx playwright install --with-deps chromium
+      - name: Run real Jolt ragdoll regression
+        working-directory: active-ragdoll
+        run: npm run test:headless
+      - name: Upload reconstructed source and report inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: active-ragdoll-headless-test-files
+          path: |
+            active-ragdoll/src/main.js
+            active-ragdoll/test/headless.mjs
+          if-no-files-found: ignore
