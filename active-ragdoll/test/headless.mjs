@@ -41,6 +41,25 @@ try {
   }
   console.log('STARTUP_TRACE=' + JSON.stringify(startupTrace));
 
+  // A/B recovery step with preserved lateral stance width and forward capture-point placement.
+  const wideStepPage = await browser.newPage();
+  wideStepPage.on('pageerror', e => errors.push(String(e)));
+  wideStepPage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await wideStepPage.goto('http://127.0.0.1:4173/?test=1&wide-step=1', { waitUntil: 'networkidle' });
+  await wideStepPage.waitForFunction(() => !!window.__ragdollTest, { timeout: 30000 });
+  const wideStepTrace = [];
+  for (let i = 0; i < 12; i++) {
+    const s = await wideStepPage.evaluate(() => window.__ragdollTest.step(12));
+    wideStepTrace.push({
+      time:s.time, mode:s.mode, action:s.action, uprightness:s.uprightness,
+      pelvisY:s.pelvisY, torsoY:s.torsoY, groundedCount:s.groundedCount,
+      com:s.com, comVelocity:s.comVelocity, capture:s.capture, stepPlan:s.stepPlan,
+      feet:s.parts.filter(p=>p.name.startsWith('foot_')).map(p=>({name:p.name,position:p.position,velocity:p.velocity,grounded:p.grounded}))
+    });
+  }
+  console.log('WIDE_STEP_TRACE=' + JSON.stringify(wideStepTrace));
+  await wideStepPage.close();
+
   // Motor-only baseline: leave the anatomical target pose fixed and disable Utility AI decisions.
   await page.evaluate(() => { window.__ragdollTest.reset(); window.__ragdollTest.setBalanceAIEnabled(false); });
   const motorOnlyTrace = [];
