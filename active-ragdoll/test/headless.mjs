@@ -86,6 +86,37 @@ try {
   }
   console.log('POSTURE_SIGN_AB=' + JSON.stringify(postureSignResults));
 
+  // Motor response A/B: same pose/physics and AI disabled; only the PD gain changes.
+  const motorGainResults = [];
+  for (const gain of [1, 2, 4]) {
+    const testPage = await browser.newPage();
+    testPage.on('pageerror', e => errors.push(String(e)));
+    testPage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    await testPage.goto('http://127.0.0.1:4173/?test=1&motor-gain=' + gain, { waitUntil: 'networkidle' });
+    await testPage.waitForFunction(() => !!window.__ragdollTest, { timeout: 30000 });
+    await testPage.evaluate(() => {
+      window.__ragdollTest.setBalanceAIEnabled(false);
+      window.__ragdollTest.setMuscleStrength(1);
+    });
+    const samples = [];
+    for (let i = 0; i < 10; i++) {
+      const s = await testPage.evaluate(() => window.__ragdollTest.step(12));
+      samples.push({
+        time:s.time, pelvisY:s.pelvisY, torsoY:s.torsoY, uprightness:s.uprightness,
+        com:s.com, comVelocity:s.comVelocity, groundedCount:s.groundedCount,
+        torque:s.torque,
+        joints:s.joints.map(j=>({
+          key:j.key,angle:j.angle,target:j.target,requested:j.requestedTorque,
+          applied:j.torque,spring:j.springTorque,damping:j.dampingTorque,
+          error:j.orientationErrorAngle,activation:j.activation
+        }))
+      });
+    }
+    motorGainResults.push({gain,samples});
+    await testPage.close();
+  }
+  console.log('MOTOR_GAIN_AB=' + JSON.stringify(motorGainResults));
+
   // Motor-only baseline: leave the anatomical target pose fixed and disable Utility AI decisions.
   await page.evaluate(() => { window.__ragdollTest.reset(); window.__ragdollTest.setBalanceAIEnabled(false); });
   const motorOnlyTrace = [];
