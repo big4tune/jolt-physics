@@ -98,6 +98,12 @@ replaceOnce(
 );
 
 replaceOnce(
+  "  if (ragdollGroupFilter && typeof ragdollGroupFilter.IsCollisionEnabled === 'function') {",
+  "  if (!new URLSearchParams(window.location.search).has('no-self-collision') && ragdollGroupFilter && typeof ragdollGroupFilter.IsCollisionEnabled === 'function') {",
+  'skip expected collision filter assertion in isolated A/B mode'
+);
+
+replaceOnce(
   '  descriptors.forEach((descriptor, index) => {',
   `  if (new URLSearchParams(window.location.search).has('no-self-collision')) {
     for (let a = 0; a < descriptors.length; a += 1) {
