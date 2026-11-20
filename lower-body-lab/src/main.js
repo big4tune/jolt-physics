@@ -56,6 +56,7 @@ const floorContactFeet = new Set();
 const selfContactPairs = new Set();
 const contactEventStats = { added: 0, persisted: 0, removed: 0 };
 const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
+const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
 const torqueChildJolt = null;
 const torqueParentJolt = null;
 
@@ -578,7 +579,7 @@ function applyJointMuscleTorques() {
       const speed = relativeW.dot(axisWorld);
       const requested = joint.baseKp * kpScale * (joint.targetHingeAngle - angle)
         - joint.baseKd * kdScale * speed;
-      const maxTorque = joint.baseMaxTorque * strength;
+      const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
       const applied = Math.max(-maxTorque, Math.min(maxTorque, requested));
       joint.orientationError = Math.abs(joint.targetHingeAngle - angle);
       joint.requestedTorque = Math.abs(requested);
@@ -597,7 +598,7 @@ function applyJointMuscleTorques() {
       torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(relativeW, -joint.baseKd * kdScale);
 
       const requested = torque.length();
-      const maxTorque = joint.baseMaxTorque * strength;
+      const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
       const applied = Math.min(requested, maxTorque);
       joint.orientationError = angle;
       joint.requestedTorque = requested;
@@ -767,6 +768,10 @@ function installTestHooks() {
     reset: resetSimulation,
     setMuscleStrength: setMuscleStrength,
     setStiffness: setStiffness,
+    setJointTorqueScale: function (type, value) {
+      if (!Object.prototype.hasOwnProperty.call(jointTorqueScale, type)) throw new Error('Unknown joint type: ' + type);
+      jointTorqueScale[type] = Math.max(0, Math.min(1, Number(value)));
+    },
     applyImpulse: applyImpulse,
     anchorError: window.__lowerBodyAnchorError
   };
