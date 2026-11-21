@@ -17,6 +17,12 @@ const FOOT_PLANT_RELEASE_SUBSTEPS = Math.max(1, Math.min(24, Math.floor(Number(Q
 const FOOT_PLANT_KP = Math.max(0, Math.min(12000, Number(QUERY.get('foot-plant-kp') || 4000)));
 const FOOT_PLANT_KD = Math.max(0, Math.min(500, Number(QUERY.get('foot-plant-kd') || 140)));
 const FOOT_PLANT_MAX_FORCE = Math.max(0, Math.min(3000, Number(QUERY.get('foot-plant-max') || 1500)));
+const ANKLE_SWING_OVERRIDE = QUERY.has('ankle-swing')
+  ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('ankle-swing'))))
+  : null;
+const ANKLE_PLANE_SWING_OVERRIDE = QUERY.has('ankle-plane-swing')
+  ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('ankle-plane-swing'))))
+  : null;
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -471,7 +477,11 @@ function createLowerBody() {
   for (const def of jointDefs) {
     const parent = partByName.get(def.a);
     const child = partByName.get(def.b);
-    const cfg = JOINT_CONFIG[def.type];
+    const cfg = Object.assign({}, JOINT_CONFIG[def.type]);
+    if (def.type === 'ankle') {
+      if (ANKLE_SWING_OVERRIDE !== null) cfg.swing = ANKLE_SWING_OVERRIDE;
+      if (ANKLE_PLANE_SWING_OVERRIDE !== null) cfg.planeSwing = ANKLE_PLANE_SWING_OVERRIDE;
+    }
     const anchor = new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2]);
 
     const parentInv = parent.initialRotation.clone().invert();
@@ -542,6 +552,8 @@ function createLowerBody() {
       targetHingeAngle: 0,
       min: cfg.twistMin,
       max: cfg.twistMax,
+      swing: cfg.swing ?? null,
+      planeSwing: cfg.planeSwing ?? null,
       baseKp: cfg.kp,
       baseKd: cfg.kd,
       baseMaxTorque: cfg.maxTorque,
@@ -871,7 +883,9 @@ function updateBodyCache() {
       floorCollisionsDisabled: DISABLE_FLOOR_COLLISIONS,
       footStartGap: FOOT_START_GAP,
       pinnedFeet: PIN_FEET,
-      physicsSubsteps: PHYSICS_SUBSTEPS
+      physicsSubsteps: PHYSICS_SUBSTEPS,
+      ankleSwingOverride: ANKLE_SWING_OVERRIDE,
+      anklePlaneSwingOverride: ANKLE_PLANE_SWING_OVERRIDE
     },
     pelvisY: pelvis.worldPosition.y,
     pelvisUp: pelvisUp,
@@ -933,6 +947,8 @@ function updateBodyCache() {
         angle: joint.isHinge ? joint.constraint.GetCurrentAngle() : null,
         min: joint.isHinge ? joint.min : null,
         max: joint.isHinge ? joint.max : null,
+        swing: joint.swing,
+        planeSwing: joint.planeSwing,
         error: joint.orientationError,
         requestedTorque: joint.requestedTorque,
         appliedTorque: joint.appliedTorque,
