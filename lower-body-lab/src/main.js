@@ -12,6 +12,8 @@ const DISABLE_FLOOR_COLLISIONS = QUERY.has('no-floor-contact');
 const FOOT_START_GAP = Math.max(0, Math.min(0.08, Number(QUERY.get('foot-gap') || 0)));
 const PHYSICS_SUBSTEPS = Math.max(1, Math.min(8, Math.floor(Number(QUERY.get('substeps') || 1))));
 const FOOT_PLANT_ENABLED = QUERY.has('foot-plant');
+const FOOT_PLANT_MODE = QUERY.get('foot-plant-mode') === 'contact' ? 'contact' : 'fixed';
+const FOOT_PLANT_RELEASE_SUBSTEPS = Math.max(1, Math.min(24, Math.floor(Number(QUERY.get('foot-plant-release') || 3))));
 const FOOT_PLANT_KP = Math.max(0, Math.min(12000, Number(QUERY.get('foot-plant-kp') || 4000)));
 const FOOT_PLANT_KD = Math.max(0, Math.min(500, Number(QUERY.get('foot-plant-kd') || 140)));
 const FOOT_PLANT_MAX_FORCE = Math.max(0, Math.min(3000, Number(QUERY.get('foot-plant-max') || 1500)));
@@ -69,7 +71,7 @@ const contactEventStats = { added: 0, persisted: 0, removed: 0 };
 const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
 const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
 const jointTorqueSign = { hip: 1, knee: 1, ankle: 1 };
-const footPlantStats = { maxForce: 0, maxDeflection: 0 };
+const footPlantStats = { maxForce: 0, maxDeflection: 0, plantEvents: 0, releaseEvents: 0 };
 const worldTargetMode = { hip: false, ankle: false };
 let rootUprightEnabled = false;
 let rootUprightSign = 1;
@@ -437,7 +439,14 @@ function createLowerBody() {
       mass: descriptor.mass,
       isDynamic: motionType === Jolt.EMotionType_Dynamic,
       isKinematic: motionType === Jolt.EMotionType_Kinematic,
-      footPlantTarget: descriptor.group === 'feet' ? descriptor.position.clone() : null,
+      bodyKey: bodyId.GetIndexAndSequenceNumber(),
+      footPlantTarget: descriptor.group === 'feet' && FOOT_PLANT_ENABLED && FOOT_PLANT_MODE === 'fixed'
+        ? descriptor.position.clone()
+        : null,
+      footPlantActive: descriptor.group === 'feet' && FOOT_PLANT_ENABLED && FOOT_PLANT_MODE === 'fixed',
+      footPlantLostContactSubsteps: 0,
+      footPlantPlantCount: 0,
+      footPlantReleaseCount: 0,
       descriptor: descriptor,
       body: body,
       bodyId: bodyId,
@@ -622,18 +631,50 @@ function updateFootPlantController() {
   if (!FOOT_PLANT_ENABLED) return;
 
   for (const part of parts) {
-    if (!part.footPlantTarget || !part.isDynamic) continue;
+    if (!part.isDynamic || !part.name.startsWith('foot_')) continue;
+
+    if (FOOT_PLANT_MODE === 'contact') {
+      const hasFloorContact = liveContactPairs.has(makeContactPairKey(floorBodyKey, part.bodyKey));
+      if (hasFloorContact) {
+        part.footPlantLostContactSubsteps = 0;
+        if (!part.footPlantActive) {
+          part.footPlantTarget = readBodyPosition(part.bodyId);
+          part.footPlantActive = true;
+          part.footPlantPlantCount += 1;
+          footPlantStats.plantEvents += 1;
+        }
+      } else if (part.footPlantActive) {
+        part.footPlantLostContactSubsteps += 1;
+        if (part.footPlantLostContactSubsteps > FOOT_PLANT_RELEASE_SUBSTEPS) {
+          part.footPlantActive = false;
+          part.footPlantTarget = null;
+          part.footPlantLostContactSubsteps = 0;
+          part.footPlantReleaseCount += 1;
+          footPlantStats.releaseEvents += 1;
+        }
+      }
+    }
+
+    if (!part.footPlantActive || !part.footPlantTarget) continue;
+
     const position = readBodyPosition(part.bodyId);
     const velocity = readBodyLinearVelocity(part.bodyId);
     const positionError = part.footPlantTarget.distanceTo(position);
     const force = part.footPlantTarget.clone().sub(position).multiplyScalar(FOOT_PLANT_KP)
       .addScaledVector(velocity, -FOOT_PLANT_KD);
+
+    // A contact plant may resist horizontal foot slip, but it must never pull
+    // a foot down or oppose lift-off. Vertical support comes from Jolt's floor
+    // contact and the normal impulse, not from this controller.
+    if (FOOT_PLANT_MODE === 'contact') force.y = 0;
+
     const magnitude = force.length();
     footPlantStats.maxForce = Math.max(footPlantStats.maxForce, Math.min(magnitude, FOOT_PLANT_MAX_FORCE));
     footPlantStats.maxDeflection = Math.max(footPlantStats.maxDeflection, positionError);
     if (magnitude > FOOT_PLANT_MAX_FORCE && magnitude > 1e-8) {
       force.multiplyScalar(FOOT_PLANT_MAX_FORCE / magnitude);
     }
+    if (magnitude <= 1e-8) continue;
     const forceJolt = makeJoltVec3(force.x, force.y, force.z);
     bodyInterface.AddForce(part.bodyId, forceJolt, Jolt.EActivation_Activate);
     Jolt.destroy(forceJolt);
@@ -843,11 +884,16 @@ function updateBodyCache() {
     },
     stanceDiagnostics: {
       footPlantEnabled: FOOT_PLANT_ENABLED,
+      footPlantMode: FOOT_PLANT_MODE,
+      footPlantReleaseSubsteps: FOOT_PLANT_RELEASE_SUBSTEPS,
       footPlantKp: FOOT_PLANT_KP,
       footPlantKd: FOOT_PLANT_KD,
       footPlantMaxForce: FOOT_PLANT_MAX_FORCE,
       measuredMaxForce: footPlantStats.maxForce,
       measuredMaxDeflection: footPlantStats.maxDeflection,
+      plantEvents: footPlantStats.plantEvents,
+      releaseEvents: footPlantStats.releaseEvents,
+      activeFeet: parts.filter(part => part.footPlantActive).map(part => part.name),
       substeps: PHYSICS_SUBSTEPS
     },
     rootUpright: {
@@ -872,7 +918,12 @@ function updateBodyCache() {
         velocity: part.worldVelocity.toArray(),
         angularVelocity: part.worldAngularVelocity.toArray(),
         rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
-        grounded: part.grounded
+        grounded: part.grounded,
+        footPlantActive: part.footPlantActive,
+        footPlantTarget: part.footPlantTarget ? part.footPlantTarget.toArray() : null,
+        footPlantLostContactSubsteps: part.footPlantLostContactSubsteps,
+        footPlantPlantCount: part.footPlantPlantCount,
+        footPlantReleaseCount: part.footPlantReleaseCount
       };
     }),
     joints: joints.map(function (joint) {
@@ -906,8 +957,6 @@ function stepFixedPhysics() {
   // Jolt once with collisionSteps > 1 would subdivide contacts, but would
   // leave the muscle torque frozen for the entire outer frame.
   const substepDt = FIXED_DT / PHYSICS_SUBSTEPS;
-  footPlantStats.maxForce = 0;
-  footPlantStats.maxDeflection = 0;
   for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep += 1) {
     updateWorldReferencedTargets();
     updateFootPlantController();
@@ -941,6 +990,18 @@ function resetSimulation() {
   contactEventStats.persisted = 0;
   contactEventStats.removed = 0;
   contactTrackingReady = false;
+  footPlantStats.maxForce = 0;
+  footPlantStats.maxDeflection = 0;
+  footPlantStats.plantEvents = 0;
+  footPlantStats.releaseEvents = 0;
+  for (const part of parts) {
+    if (!part.name.startsWith('foot_')) continue;
+    part.footPlantLostContactSubsteps = 0;
+    part.footPlantPlantCount = 0;
+    part.footPlantReleaseCount = 0;
+    part.footPlantActive = FOOT_PLANT_ENABLED && FOOT_PLANT_MODE === 'fixed';
+    part.footPlantTarget = part.footPlantActive ? part.initialPosition.clone() : null;
+  }
   torqueStats.maxRequested = 0;
   torqueStats.maxApplied = 0;
   torqueStats.saturated = 0;
