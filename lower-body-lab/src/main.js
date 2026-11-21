@@ -1163,6 +1163,7 @@ function updateBodyCache() {
         max: joint.isHinge ? joint.max : null,
         swing: joint.swing,
         planeSwing: joint.planeSwing,
+        targetHingeAngle: joint.isHinge ? joint.targetHingeAngle : null,
         error: joint.orientationError,
         requestedTorque: joint.requestedTorque,
         appliedTorque: joint.appliedTorque,
@@ -1241,6 +1242,13 @@ function resetSimulation() {
   torqueStats.saturated = 0;
   torqueStats.active = 0;
   for (const joint of joints) {
+    // Reset controller targets as well as rigid-body transforms. Otherwise a
+    // previous high-frequency probe can leave a hinge/hip command active in
+    // the next scenario even though every body has been returned to its
+    // initial pose.
+    joint.targetRelative.copy(joint.defaultRelative);
+    joint.targetHingeAngle = 0;
+    joint.extraWorldTorque.set(0, 0, 0);
     joint.orientationError = 0;
     joint.requestedTorque = 0;
     joint.appliedTorque = 0;
