@@ -35,6 +35,7 @@ const HIP_SWING_OVERRIDE = QUERY.has('hip-swing')
 const HIP_PLANE_SWING_OVERRIDE = QUERY.has('hip-plane-swing')
   ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('hip-plane-swing'))))
   : null;
+const ROOT_UPRIGHT_MODE = QUERY.get('root-mode') === 'direct' ? 'direct' : 'hip-pair';
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -754,10 +755,19 @@ function updateRootUprightMoment() {
   }
   lastRootUprightTorque.copy(pelvisTorque);
 
-  // The requested moment acts on the pelvis; equal/opposite moments act on
-  // both thighs through the two hip actuators, preserving angular momentum.
-  const hips = joints.filter(function (joint) { return joint.type === 'hip'; });
-  for (const hip of hips) hip.extraWorldTorque.copy(pelvisTorque).multiplyScalar(-1 / Math.max(1, hips.length));
+  if (ROOT_UPRIGHT_MODE === 'direct') {
+    // Diagnostic ablation: apply the root stabilizer directly to the pelvis.
+    // This deliberately bypasses the hip PD channels to reveal whether the
+    // previous hip-pair implementation was cancelling the local hip servos.
+    const torqueJolt = makeJoltVec3(pelvisTorque.x, pelvisTorque.y, pelvisTorque.z);
+    bodyInterface.AddTorque(pelvis.bodyId, torqueJolt, Jolt.EActivation_Activate);
+    Jolt.destroy(torqueJolt);
+  } else {
+    // Physically internal alternative: equal/opposite moments are routed
+    // through the hip actuators, where they may interact with hip PD torque.
+    const hips = joints.filter(function (joint) { return joint.type === 'hip'; });
+    for (const hip of hips) hip.extraWorldTorque.copy(pelvisTorque).multiplyScalar(-1 / Math.max(1, hips.length));
+  }
 }
 
 function applyJointMuscleTorques() {
@@ -939,6 +949,7 @@ function updateBodyCache() {
       kd: rootUprightKd,
       sign: rootUprightSign,
       maxMoment: rootUprightMaxMoment,
+      mode: ROOT_UPRIGHT_MODE,
       appliedMoment: lastRootUprightTorque.length()
     },
     groundedFeet: feet.filter(function (foot) { return foot.grounded; }).map(function (foot) { return foot.name; }),
