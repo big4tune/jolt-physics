@@ -101,6 +101,7 @@ let rootUprightKp = 140;
 let rootUprightKd = 18;
 let rootUprightMaxMoment = 240;
 let lastRootUprightTorque = new THREE.Vector3();
+let lastRootSupportAnkles = [];
 const torqueChildJolt = null;
 const torqueParentJolt = null;
 
@@ -830,6 +831,7 @@ function updateWorldReferencedTargets() {
 function updateRootUprightMoment() {
   for (const joint of joints) joint.extraWorldTorque.set(0, 0, 0);
   lastRootUprightTorque.set(0, 0, 0);
+  lastRootSupportAnkles = [];
   if (!rootUprightEnabled) return;
 
   const pelvis = partByName.get('pelvis');
@@ -863,12 +865,16 @@ function updateRootUprightMoment() {
     bodyInterface.AddTorque(pelvis.bodyId, torqueJolt, Jolt.EActivation_Activate);
     Jolt.destroy(torqueJolt);
   } else if (ROOT_UPRIGHT_MODE === 'ankle-pair') {
-    // Route the corrective root moment through both ankle motors.
-    // The foot receives the opposite moment while its contact with the floor
-    // provides the external reaction; no free torque is injected into the rig.
-    const ankles = joints.filter(function (joint) { return joint.type === 'ankle'; });
-    for (const ankle of ankles) ankle.extraWorldTorque.copy(pelvisTorque)
-      .multiplyScalar(-1 / Math.max(1, ankles.length));
+    // Only stance ankles can exchange corrective moment with the ground.
+    // In double support both share it; in single support the remaining stance
+    // ankle receives the full moment while the swing ankle remains unburdened.
+    const stanceAnkles = joints.filter(function (joint) {
+      return joint.type === 'ankle'
+        && liveContactPairs.has(makeContactPairKey(floorBodyKey, joint.child.bodyKey));
+    });
+    lastRootSupportAnkles = stanceAnkles.map(joint => joint.key);
+    for (const ankle of stanceAnkles) ankle.extraWorldTorque.copy(pelvisTorque)
+      .multiplyScalar(-1 / Math.max(1, stanceAnkles.length));
   } else {
     // Root correction routed through the two hip motors.
     const hips = joints.filter(function (joint) { return joint.type === 'hip'; });
@@ -1116,6 +1122,7 @@ function updateBodyCache() {
       sign: rootUprightSign,
       maxMoment: rootUprightMaxMoment,
       mode: ROOT_UPRIGHT_MODE,
+      supportAnkles: lastRootSupportAnkles.slice(),
       appliedMoment: lastRootUprightTorque.length()
     },
     groundedFeet: feet.filter(function (foot) { return foot.grounded; }).map(function (foot) { return foot.name; }),
@@ -1207,6 +1214,7 @@ function resetSimulation() {
   }
 
   liveContactPairs.clear();
+  lastRootSupportAnkles = [];
   floorContactManifolds.clear();
   floorContactPoints.length = 0;
   floorContactFeet.clear();
@@ -1289,6 +1297,24 @@ function installTestHooks() {
       if (!Object.prototype.hasOwnProperty.call(worldTargetMode, kind)) throw new Error('Unknown world target mode: ' + kind);
       worldTargetMode[kind] = !!enabled;
       for (const joint of joints) joint.targetRelative.copy(joint.defaultRelative);
+    },
+    setJointTargetHingeAngle: function (key, angle) {
+      const joint = joints.find(candidate => candidate.key === key);
+      if (!joint) throw new Error('Unknown joint: ' + key);
+      if (!joint.isHinge) throw new Error('Joint is not a hinge: ' + key);
+      joint.targetHingeAngle = THREE.MathUtils.clamp(Number(angle), joint.min, joint.max);
+      return joint.targetHingeAngle;
+    },
+    setJointTargetRelativeRotation: function (key, axis, angle) {
+      const joint = joints.find(candidate => candidate.key === key);
+      if (!joint) throw new Error('Unknown joint: ' + key);
+      if (joint.isHinge) throw new Error('Joint is not a swing-twist joint: ' + key);
+      const localAxis = new THREE.Vector3(Number(axis[0]), Number(axis[1]), Number(axis[2]));
+      if (localAxis.lengthSq() < 1e-8) throw new Error('Target rotation axis must be non-zero');
+      localAxis.normalize();
+      const offset = new THREE.Quaternion().setFromAxisAngle(localAxis, Number(angle));
+      joint.targetRelative.copy(joint.defaultRelative).multiply(offset).normalize();
+      return joint.targetRelative.toArray();
     },
     setJointTorqueScale: function (type, value) {
       if (!Object.prototype.hasOwnProperty.call(jointTorqueScale, type)) throw new Error('Unknown joint type: ' + type);
