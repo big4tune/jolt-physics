@@ -1046,6 +1046,28 @@ function updateBodyCache() {
     com.z + comVelocity.z / captureOmega
   ];
   const capturePointMargin = signedMarginToSupportPolygonXZ(capturePoint, supportPolygonXZ);
+
+  // Keep each foot's contact hull separate. The combined double-support
+  // polygon can report a healthy margin even when the COM cannot be caught
+  // by either foot alone; single-support readiness needs this per-foot view.
+  const contactPointsByFoot = { foot_L: [], foot_R: [] };
+  for (const manifold of floorContactManifolds.values()) {
+    if (!contactPointsByFoot[manifold.footName]) continue;
+    for (const point of manifold.points) contactPointsByFoot[manifold.footName].push(point.slice());
+  }
+  const footSupport = {};
+  for (const footName of ['foot_L', 'foot_R']) {
+    const points = contactPointsByFoot[footName];
+    const polygon = convexHullXZ(points);
+    footSupport[footName] = {
+      grounded: floorContactFeet.has(footName),
+      contactPointCount: points.length,
+      supportPolygonXZ: polygon,
+      comProjectionMargin: signedMarginToSupportPolygonXZ(comProjection, polygon),
+      capturePointMargin: signedMarginToSupportPolygonXZ(capturePoint, polygon)
+    };
+  }
+
   const contactCentroid = floorContactPoints.length > 0
     ? floorContactPoints.reduce((sum, point) => {
         sum[0] += point[0];
@@ -1060,6 +1082,7 @@ function updateBodyCache() {
     contactPointCount: floorContactPoints.length,
     contactManifoldReadErrors: contactManifoldReadErrors,
     supportPolygonXZ: supportPolygonXZ,
+    footSupport: footSupport,
     comProjection: comProjection,
     comProjectionOffset: contactCentroid
       ? [com.x - contactCentroid[0], com.z - contactCentroid[1]]
