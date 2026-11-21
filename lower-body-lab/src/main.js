@@ -29,6 +29,12 @@ const ANKLE_TWIST_MIN_OVERRIDE = QUERY.has('ankle-twist-min')
 const ANKLE_TWIST_MAX_OVERRIDE = QUERY.has('ankle-twist-max')
   ? Math.max(-3.12, Math.min(3.12, Number(QUERY.get('ankle-twist-max'))))
   : null;
+const HIP_SWING_OVERRIDE = QUERY.has('hip-swing')
+  ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('hip-swing'))))
+  : null;
+const HIP_PLANE_SWING_OVERRIDE = QUERY.has('hip-plane-swing')
+  ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('hip-plane-swing'))))
+  : null;
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -484,6 +490,10 @@ function createLowerBody() {
     const parent = partByName.get(def.a);
     const child = partByName.get(def.b);
     const cfg = Object.assign({}, JOINT_CONFIG[def.type]);
+    if (def.type === 'hip') {
+      if (HIP_SWING_OVERRIDE !== null) cfg.swing = HIP_SWING_OVERRIDE;
+      if (HIP_PLANE_SWING_OVERRIDE !== null) cfg.planeSwing = HIP_PLANE_SWING_OVERRIDE;
+    }
     if (def.type === 'ankle') {
       if (ANKLE_SWING_OVERRIDE !== null) cfg.swing = ANKLE_SWING_OVERRIDE;
       if (ANKLE_PLANE_SWING_OVERRIDE !== null) cfg.planeSwing = ANKLE_PLANE_SWING_OVERRIDE;
@@ -896,7 +906,9 @@ function updateBodyCache() {
       ankleSwingOverride: ANKLE_SWING_OVERRIDE,
       anklePlaneSwingOverride: ANKLE_PLANE_SWING_OVERRIDE,
       ankleTwistMinOverride: ANKLE_TWIST_MIN_OVERRIDE,
-      ankleTwistMaxOverride: ANKLE_TWIST_MAX_OVERRIDE
+      ankleTwistMaxOverride: ANKLE_TWIST_MAX_OVERRIDE,
+      hipSwingOverride: HIP_SWING_OVERRIDE,
+      hipPlaneSwingOverride: HIP_PLANE_SWING_OVERRIDE
     },
     pelvisY: pelvis.worldPosition.y,
     pelvisUp: pelvisUp,
