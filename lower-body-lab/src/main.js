@@ -35,7 +35,7 @@ const HIP_SWING_OVERRIDE = QUERY.has('hip-swing')
 const HIP_PLANE_SWING_OVERRIDE = QUERY.has('hip-plane-swing')
   ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('hip-plane-swing'))))
   : null;
-const ROOT_UPRIGHT_MODE = ['direct', 'hip-free'].includes(QUERY.get('root-mode')) ? QUERY.get('root-mode') : 'hip-pair';
+const ROOT_UPRIGHT_MODE = ['direct', 'hip-free', 'ankle-pair'].includes(QUERY.get('root-mode')) ? QUERY.get('root-mode') : 'hip-pair';
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -858,16 +858,22 @@ function updateRootUprightMoment() {
 
   if (ROOT_UPRIGHT_MODE === 'direct') {
     // Diagnostic ablation: apply the root stabilizer directly to the pelvis.
-    // This deliberately bypasses the hip PD channels to reveal whether the
-    // previous hip-pair implementation was cancelling the local hip servos.
+    // This deliberately bypasses the joint actuators and is not a final controller.
     const torqueJolt = makeJoltVec3(pelvisTorque.x, pelvisTorque.y, pelvisTorque.z);
     bodyInterface.AddTorque(pelvis.bodyId, torqueJolt, Jolt.EActivation_Activate);
     Jolt.destroy(torqueJolt);
+  } else if (ROOT_UPRIGHT_MODE === 'ankle-pair') {
+    // Route the corrective root moment through both ankle motors.
+    // The foot receives the opposite moment while its contact with the floor
+    // provides the external reaction; no free torque is injected into the rig.
+    const ankles = joints.filter(function (joint) { return joint.type === 'ankle'; });
+    for (const ankle of ankles) ankle.extraWorldTorque.copy(pelvisTorque)
+      .multiplyScalar(-1 / Math.max(1, ankles.length));
   } else {
-    // Physically internal alternative: equal/opposite moments are routed
-    // through the hip actuators, where they may interact with hip PD torque.
+    // Root correction routed through the two hip motors.
     const hips = joints.filter(function (joint) { return joint.type === 'hip'; });
-    for (const hip of hips) hip.extraWorldTorque.copy(pelvisTorque).multiplyScalar(-1 / Math.max(1, hips.length));
+    for (const hip of hips) hip.extraWorldTorque.copy(pelvisTorque)
+      .multiplyScalar(-1 / Math.max(1, hips.length));
   }
 }
 
