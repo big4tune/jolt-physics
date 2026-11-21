@@ -35,7 +35,7 @@ const HIP_SWING_OVERRIDE = QUERY.has('hip-swing')
 const HIP_PLANE_SWING_OVERRIDE = QUERY.has('hip-plane-swing')
   ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('hip-plane-swing'))))
   : null;
-const ROOT_UPRIGHT_MODE = QUERY.get('root-mode') === 'direct' ? 'direct' : 'hip-pair';
+const ROOT_UPRIGHT_MODE = ['direct', 'hip-free'].includes(QUERY.get('root-mode')) ? QUERY.get('root-mode') : 'hip-pair';
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -827,7 +827,18 @@ function applyJointMuscleTorques() {
         errorAngle: angle,
         dampingVelocity: dampingW.toArray()
       };
-      torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale).addScaledVector(dampingW, -joint.baseKd * kdScale).add(joint.extraWorldTorque);
+      const stanceHipTorqueIsFree = rootUprightEnabled
+        && ROOT_UPRIGHT_MODE === 'hip-free'
+        && joint.type === 'hip';
+      if (stanceHipTorqueIsFree) {
+        // SIMBICON-style stance-hip treatment: the root stabilizer owns the
+        // stance-hip torque; do not superimpose a local pose PD that can cancel it.
+        torque.copy(joint.extraWorldTorque);
+      } else {
+        torque.copy(axis).multiplyScalar(angle * joint.baseKp * kpScale)
+          .addScaledVector(dampingW, -joint.baseKd * kdScale)
+          .add(joint.extraWorldTorque);
+      }
 
       const requested = torque.length();
       const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
