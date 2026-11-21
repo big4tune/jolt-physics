@@ -23,6 +23,12 @@ const ANKLE_SWING_OVERRIDE = QUERY.has('ankle-swing')
 const ANKLE_PLANE_SWING_OVERRIDE = QUERY.has('ankle-plane-swing')
   ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('ankle-plane-swing'))))
   : null;
+const ANKLE_TWIST_MIN_OVERRIDE = QUERY.has('ankle-twist-min')
+  ? Math.max(-3.12, Math.min(3.12, Number(QUERY.get('ankle-twist-min'))))
+  : null;
+const ANKLE_TWIST_MAX_OVERRIDE = QUERY.has('ankle-twist-max')
+  ? Math.max(-3.12, Math.min(3.12, Number(QUERY.get('ankle-twist-max'))))
+  : null;
 const LAYER_NON_MOVING = 0;
 const LAYER_MOVING = 1;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -481,6 +487,9 @@ function createLowerBody() {
     if (def.type === 'ankle') {
       if (ANKLE_SWING_OVERRIDE !== null) cfg.swing = ANKLE_SWING_OVERRIDE;
       if (ANKLE_PLANE_SWING_OVERRIDE !== null) cfg.planeSwing = ANKLE_PLANE_SWING_OVERRIDE;
+      if (ANKLE_TWIST_MIN_OVERRIDE !== null) cfg.twistMin = ANKLE_TWIST_MIN_OVERRIDE;
+      if (ANKLE_TWIST_MAX_OVERRIDE !== null) cfg.twistMax = ANKLE_TWIST_MAX_OVERRIDE;
+      if (cfg.twistMin > cfg.twistMax) throw new Error('Ankle twist minimum must not exceed maximum');
     }
     const anchor = new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2]);
 
@@ -885,7 +894,9 @@ function updateBodyCache() {
       pinnedFeet: PIN_FEET,
       physicsSubsteps: PHYSICS_SUBSTEPS,
       ankleSwingOverride: ANKLE_SWING_OVERRIDE,
-      anklePlaneSwingOverride: ANKLE_PLANE_SWING_OVERRIDE
+      anklePlaneSwingOverride: ANKLE_PLANE_SWING_OVERRIDE,
+      ankleTwistMinOverride: ANKLE_TWIST_MIN_OVERRIDE,
+      ankleTwistMaxOverride: ANKLE_TWIST_MAX_OVERRIDE
     },
     pelvisY: pelvis.worldPosition.y,
     pelvisUp: pelvisUp,
