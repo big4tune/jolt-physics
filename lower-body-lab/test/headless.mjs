@@ -187,6 +187,7 @@ async function runScenario(page, options) {
           groundedFeet: state.groundedFeet,
           stanceDiagnostics: state.stanceDiagnostics,
           balanceDiagnostics: state.balanceDiagnostics,
+          supportContactPoints: state.balanceDiagnostics.supportPolygonXZ,
           limbAlignment: state.parts.filter(part => part.limbAxisUpDot !== null).map(part => ({
             name: part.name,
             axisUpDot: part.limbAxisUpDot,
@@ -754,7 +755,10 @@ try {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
     assert.ok(state.parts.every(part => part.velocity.every(Number.isFinite)), 'Physics returned a non-finite body velocity');
+    assert.ok(Number.isFinite(state.balanceDiagnostics.captureOmega), 'Capture-point frequency must be finite');
+    assert.ok(state.balanceDiagnostics.supportPolygonXZ.every(point => point.every(Number.isFinite)), 'Support polygon must contain finite coordinates');
   }
+
 
   const report = {
     model: {
@@ -905,6 +909,12 @@ try {
     },
     browserErrors: errors
   };
+
+  const supportProbe = report.scenarios.directRootContactMaxPD.final.balanceDiagnostics;
+  assert.ok(supportProbe.contactPointCount > 0, 'Jolt floor manifold did not expose any foot contact points');
+  assert.ok(supportProbe.supportPolygonXZ.length >= 3, 'Expected a 2D convex support polygon from both feet');
+  assert.ok(Number.isFinite(supportProbe.comProjectionMargin), 'COM support margin should be finite');
+  assert.ok(Number.isFinite(supportProbe.capturePointMargin), 'Capture-point support margin should be finite');
 
   fs.writeFileSync(new URL('./report.json', import.meta.url), JSON.stringify(report, null, 2));
   console.log('LOWER_BODY_REPORT=' + JSON.stringify(report));

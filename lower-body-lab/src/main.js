@@ -83,10 +83,13 @@ const partByName = new Map();
 const shapes = [];
 const joints = [];
 const liveContactPairs = new Set();
+const floorContactManifolds = new Map();
+const floorContactPoints = [];
 const bodyNameById = new Map();
 const floorContactFeet = new Set();
 const selfContactPairs = new Set();
 const contactEventStats = { added: 0, persisted: 0, removed: 0 };
+let contactManifoldReadErrors = 0;
 const torqueStats = { maxRequested: 0, maxApplied: 0, saturated: 0, active: 0 };
 const jointTorqueScale = { hip: 1, knee: 1, ankle: 1 };
 const jointTorqueSign = { hip: 1, knee: 1, ankle: 1 };
@@ -187,34 +190,127 @@ function makeContactPairKey(a, b) {
   return a < b ? String(a) + ':' + String(b) : String(b) + ':' + String(a);
 }
 
+function convexHullXZ(points) {
+  const sorted = points
+    .map(point => ({ x: point[0], z: point[2] }))
+    .sort((a, b) => a.x === b.x ? a.z - b.z : a.x - b.x);
+  const unique = [];
+  for (const point of sorted) {
+    const previous = unique[unique.length - 1];
+    if (!previous || Math.hypot(point.x - previous.x, point.z - previous.z) > 1e-5) {
+      unique.push(point);
+    }
+  }
+  if (unique.length <= 2) return unique.map(point => [point.x, point.z]);
+
+  function cross(o, a, b) {
+    return (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+  }
+
+  const lower = [];
+  for (const point of unique) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 1e-9) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+  const upper = [];
+  for (let i = unique.length - 1; i >= 0; i -= 1) {
+    const point = unique[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 1e-9) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper).map(point => [point.x, point.z]);
+}
+
+function signedMarginToSupportPolygonXZ(point, polygon) {
+  if (!polygon || polygon.length < 3) return null;
+  let inside = true;
+  let minimumInsideDistance = Infinity;
+  let minimumOutsideDistance = Infinity;
+
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const length = Math.hypot(dx, dz);
+    if (length < 1e-8) continue;
+    const signedDistance = (dx * (point[1] - a[1]) - dz * (point[0] - a[0])) / length;
+    if (signedDistance < -1e-7) inside = false;
+    minimumInsideDistance = Math.min(minimumInsideDistance, signedDistance);
+
+    const t = Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dz) / (length * length)));
+    const closestX = a[0] + dx * t;
+    const closestZ = a[1] + dz * t;
+    minimumOutsideDistance = Math.min(minimumOutsideDistance, Math.hypot(point[0] - closestX, point[1] - closestZ));
+  }
+
+  return inside ? minimumInsideDistance : -minimumOutsideDistance;
+}
+
 function installContactListener() {
   contactListener = new Jolt.ContactListenerJS();
   contactListener.OnContactValidate = function () {
     return Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
   };
 
-  function setPair(body1Pointer, body2Pointer, active, kind) {
+  function setPair(body1Pointer, body2Pointer, manifoldPointer, active, kind) {
     const body1 = Jolt.wrapPointer(body1Pointer, Jolt.Body);
     const body2 = Jolt.wrapPointer(body2Pointer, Jolt.Body);
     const id1 = body1.GetID().GetIndexAndSequenceNumber();
     const id2 = body2.GetID().GetIndexAndSequenceNumber();
     const key = makeContactPairKey(id1, id2);
-    if (active) liveContactPairs.add(key);
-    else liveContactPairs.delete(key);
+    if (active) {
+      liveContactPairs.add(key);
+      if (id1 === floorBodyKey || id2 === floorBodyKey) {
+        const footId = id1 === floorBodyKey ? id2 : id1;
+        const footName = bodyNameById.get(footId);
+        if (footName && footName.indexOf('foot_') === 0 && manifoldPointer) {
+          try {
+            const manifold = Jolt.wrapPointer(manifoldPointer, Jolt.ContactManifold);
+            const relativePoints = manifold.mRelativeContactPointsOn1;
+            const pointCount = relativePoints.size();
+            const footIsBody1 = id1 === footId;
+            const points = [];
+            for (let i = 0; i < pointCount; i += 1) {
+              const worldPoint = footIsBody1
+                ? manifold.GetWorldSpaceContactPointOn1(i)
+                : manifold.GetWorldSpaceContactPointOn2(i);
+              // Jolt's Emscripten getter wrappers may reuse temporary storage:
+              // copy every coordinate before asking for the next point.
+              points.push([worldPoint.GetX(), worldPoint.GetY(), worldPoint.GetZ()]);
+            }
+            floorContactManifolds.set(key, { footName: footName, points: points });
+          } catch (error) {
+            contactManifoldReadErrors += 1;
+          }
+        }
+      }
+    } else {
+      liveContactPairs.delete(key);
+      floorContactManifolds.delete(key);
+    }
     contactEventStats[kind] += 1;
   }
 
-  contactListener.OnContactAdded = function (a, b) {
-    setPair(a, b, true, 'added');
+  contactListener.OnContactAdded = function (a, b, manifold, settings) {
+    setPair(a, b, manifold, true, 'added');
   };
-  contactListener.OnContactPersisted = function (a, b) {
-    setPair(a, b, true, 'persisted');
+  contactListener.OnContactPersisted = function (a, b, manifold, settings) {
+    setPair(a, b, manifold, true, 'persisted');
   };
   contactListener.OnContactRemoved = function (pairPointer) {
     const pair = Jolt.wrapPointer(pairPointer, Jolt.SubShapeIDPair);
     const id1 = pair.GetBody1ID().GetIndexAndSequenceNumber();
     const id2 = pair.GetBody2ID().GetIndexAndSequenceNumber();
-    liveContactPairs.delete(makeContactPairKey(id1, id2));
+    const key = makeContactPairKey(id1, id2);
+    liveContactPairs.delete(key);
+    floorContactManifolds.delete(key);
     contactEventStats.removed += 1;
   };
 
@@ -224,6 +320,7 @@ function installContactListener() {
 function refreshContactMetadata() {
   floorContactFeet.clear();
   selfContactPairs.clear();
+  floorContactPoints.length = 0;
 
   for (const key of liveContactPairs) {
     const ids = key.split(':').map(Number);
@@ -234,6 +331,10 @@ function refreshContactMetadata() {
       const other = a === floorBodyKey ? b : a;
       const name = bodyNameById.get(other);
       if (name && name.indexOf('foot_') === 0) floorContactFeet.add(name);
+      const manifold = floorContactManifolds.get(key);
+      if (manifold) {
+        for (const point of manifold.points) floorContactPoints.push(point.slice());
+      }
       continue;
     }
 
@@ -913,25 +1014,51 @@ function updateBodyCache() {
     };
   });
   const supportFeet = feet.filter(foot => foot.grounded);
-  const supportPoint = new THREE.Vector3();
+  const supportFootCenter = new THREE.Vector3();
   for (const foot of supportFeet) {
     const p = partByName.get(foot.name).worldPosition;
-    supportPoint.x += p.x;
-    supportPoint.z += p.z;
+    supportFootCenter.x += p.x;
+    supportFootCenter.z += p.z;
   }
   if (supportFeet.length > 0) {
-    supportPoint.x /= supportFeet.length;
-    supportPoint.z /= supportFeet.length;
+    supportFootCenter.x /= supportFeet.length;
+    supportFootCenter.z /= supportFeet.length;
   }
+  const supportPolygonXZ = convexHullXZ(floorContactPoints);
+  const comProjection = [com.x, com.z];
+  const comProjectionMargin = signedMarginToSupportPolygonXZ(comProjection, supportPolygonXZ);
+  const effectiveComHeight = Math.max(0.05, com.y);
+  const captureOmega = Math.sqrt(9.81 / effectiveComHeight);
+  const capturePoint = [
+    com.x + comVelocity.x / captureOmega,
+    com.z + comVelocity.z / captureOmega
+  ];
+  const capturePointMargin = signedMarginToSupportPolygonXZ(capturePoint, supportPolygonXZ);
+  const contactCentroid = floorContactPoints.length > 0
+    ? floorContactPoints.reduce((sum, point) => {
+        sum[0] += point[0];
+        sum[1] += point[2];
+        return sum;
+      }, [0, 0]).map(value => value / floorContactPoints.length)
+    : null;
   const balanceDiagnostics = {
-    supportPoint: supportFeet.length > 0 ? [supportPoint.x, 0, supportPoint.z] : null,
+    supportPoint: contactCentroid ? [contactCentroid[0], 0, contactCentroid[1]] : null,
+    supportFootCenter: supportFeet.length > 0 ? [supportFootCenter.x, 0, supportFootCenter.z] : null,
     groundedFootCount: supportFeet.length,
-    comProjectionOffset: supportFeet.length > 0
-      ? [com.x - supportPoint.x, com.z - supportPoint.z]
+    contactPointCount: floorContactPoints.length,
+    contactManifoldReadErrors: contactManifoldReadErrors,
+    supportPolygonXZ: supportPolygonXZ,
+    comProjection: comProjection,
+    comProjectionOffset: contactCentroid
+      ? [com.x - contactCentroid[0], com.z - contactCentroid[1]]
       : null,
-    comProjectionOffsetLength: supportFeet.length > 0
-      ? Math.hypot(com.x - supportPoint.x, com.z - supportPoint.z)
-      : null
+    comProjectionOffsetLength: contactCentroid
+      ? Math.hypot(com.x - contactCentroid[0], com.z - contactCentroid[1])
+      : null,
+    comProjectionMargin: comProjectionMargin,
+    capturePoint: capturePoint,
+    capturePointMargin: capturePointMargin,
+    captureOmega: captureOmega
   };
 
   return {
@@ -989,6 +1116,7 @@ function updateBodyCache() {
     feet: feet,
     selfContacts: Array.from(selfContactPairs),
     contactEvents: Object.assign({}, contactEventStats),
+    contactManifoldReadErrors: contactManifoldReadErrors,
     torque: Object.assign({}, torqueStats),
     parts: parts.map(function (part) {
       return {
@@ -1073,8 +1201,11 @@ function resetSimulation() {
   }
 
   liveContactPairs.clear();
+  floorContactManifolds.clear();
+  floorContactPoints.length = 0;
   floorContactFeet.clear();
   selfContactPairs.clear();
+  contactManifoldReadErrors = 0;
   contactEventStats.added = 0;
   contactEventStats.persisted = 0;
   contactEventStats.removed = 0;
