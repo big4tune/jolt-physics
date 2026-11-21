@@ -933,6 +933,9 @@ function updateBodyCache() {
         angularVelocity: part.worldAngularVelocity.toArray(),
         rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
         grounded: part.grounded,
+        footUpDot: part.name.startsWith('foot_')
+          ? new THREE.Vector3(0, 1, 0).applyQuaternion(part.worldRotation).dot(WORLD_UP)
+          : null,
         footPlantActive: part.footPlantActive,
         footPlantTarget: part.footPlantTarget ? part.footPlantTarget.toArray() : null,
         footPlantLostContactSubsteps: part.footPlantLostContactSubsteps,
