@@ -912,6 +912,27 @@ function updateBodyCache() {
       grounded: part.grounded
     };
   });
+  const supportFeet = feet.filter(foot => foot.grounded);
+  const supportPoint = new THREE.Vector3();
+  for (const foot of supportFeet) {
+    const p = partByName.get(foot.name).worldPosition;
+    supportPoint.x += p.x;
+    supportPoint.z += p.z;
+  }
+  if (supportFeet.length > 0) {
+    supportPoint.x /= supportFeet.length;
+    supportPoint.z /= supportFeet.length;
+  }
+  const balanceDiagnostics = {
+    supportPoint: supportFeet.length > 0 ? [supportPoint.x, 0, supportPoint.z] : null,
+    groundedFootCount: supportFeet.length,
+    comProjectionOffset: supportFeet.length > 0
+      ? [com.x - supportPoint.x, com.z - supportPoint.z]
+      : null,
+    comProjectionOffsetLength: supportFeet.length > 0
+      ? Math.hypot(com.x - supportPoint.x, com.z - supportPoint.z)
+      : null
+  };
 
   return {
     step: testStepCount,
@@ -936,6 +957,7 @@ function updateBodyCache() {
     com: com.toArray(),
     rigCom: rigCom.toArray(),
     comVelocity: comVelocity.toArray(),
+    balanceDiagnostics: balanceDiagnostics,
     controller: {
       stiffness: controllerStiffness,
       damping: controllerDamping
@@ -979,6 +1001,9 @@ function updateBodyCache() {
         rotation: [part.worldRotation.x, part.worldRotation.y, part.worldRotation.z, part.worldRotation.w],
         grounded: part.grounded,
         footUpDot: part.name.startsWith('foot_')
+          ? new THREE.Vector3(0, 1, 0).applyQuaternion(part.worldRotation).dot(WORLD_UP)
+          : null,
+        limbAxisUpDot: part.name.startsWith('thigh_') || part.name.startsWith('shin_')
           ? new THREE.Vector3(0, 1, 0).applyQuaternion(part.worldRotation).dot(WORLD_UP)
           : null,
         footPlantActive: part.footPlantActive,
