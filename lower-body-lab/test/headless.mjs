@@ -389,37 +389,49 @@ async function runClosedLoopUnloadScenario(page, options) {
     let state = api.snapshot();
 
     for (let frame = 0; frame < totalFrames; frame += 1) {
-      if (frame >= shiftStart && !swingStarted && !abortReason) {
+      if (frame >= shiftStart && !abortReason) {
         const rightSupport = state.balanceDiagnostics.footSupport.foot_R;
         const bothGrounded = state.groundedFeet.includes('foot_L') && state.groundedFeet.includes('foot_R');
         const safePosture = state.pelvisY > 0.98 && state.pelvisUp > 0.96;
         const margin = rightSupport?.capturePointMargin;
-        if (!bothGrounded || !safePosture || !Number.isFinite(margin)) {
-          abortReason = !bothGrounded ? 'double-support-lost-during-unload'
-            : !safePosture ? 'posture-degraded-during-unload' : 'capture-point-unavailable';
-        } else {
+
+        if (!swingStarted) {
+          if (!bothGrounded || !safePosture || !Number.isFinite(margin)) {
+            abortReason = !bothGrounded ? 'double-support-lost-during-unload'
+              : !safePosture ? 'posture-degraded-during-unload' : 'capture-point-unavailable';
+          } else {
+            const error = targetMargin - margin;
+            const desiredAngle = Math.max(maxAngle, Math.min(0, targetAngle - error * 0.55));
+            const maxDelta = maxAngleRate / 60;
+            targetAngle += Math.max(-maxDelta, Math.min(maxDelta, desiredAngle - targetAngle));
+            api.setJointTargetRelativeRotation('pelvis->thigh_R', [0, 0, 1], targetAngle);
+            if (margin >= targetMargin && state.pelvisY > 1.0 && state.pelvisUp > 0.98) {
+              stableFrames += 1;
+            } else {
+              stableFrames = 0;
+            }
+            if (stableFrames >= stableFramesRequired) {
+              api.configureFootSwing({
+                side: 'L', startTime: frame / 60, duration: swingDuration,
+                offset: config.stepOffset ?? [0, 0, -0.10],
+                lift: config.lift ?? 0.08,
+                kp: config.swingKp ?? 450, kd: config.swingKd ?? 55,
+                maxForce: config.swingMaxForce ?? 75,
+                landingTolerance: 0.055, landingSpeedTolerance: 0.45,
+                requiredTouchdownSubsteps: 4
+              });
+              swingStarted = true;
+              swingStartTime = frame / 60;
+            }
+          }
+        } else if (config.continueStanceFeedback && Number.isFinite(margin) && safePosture) {
+          // Keep regulating the stance leg after swing initiation; the previous
+          // experiment froze this target exactly when single support began.
           const error = targetMargin - margin;
-          // Negative hip flexion shifts the COM toward the right support foot.
           const desiredAngle = Math.max(maxAngle, Math.min(0, targetAngle - error * 0.55));
           const maxDelta = maxAngleRate / 60;
           targetAngle += Math.max(-maxDelta, Math.min(maxDelta, desiredAngle - targetAngle));
           api.setJointTargetRelativeRotation('pelvis->thigh_R', [0, 0, 1], targetAngle);
-          if (margin >= targetMargin && state.pelvisY > 1.0 && state.pelvisUp > 0.98) {
-            stableFrames += 1;
-          } else {
-            stableFrames = 0;
-          }
-          if (stableFrames >= stableFramesRequired) {
-            api.configureFootSwing({
-              side: 'L', startTime: frame / 60, duration: swingDuration,
-              offset: config.stepOffset ?? [0, 0, -0.10],
-              lift: config.lift ?? 0.08, kp: 450, kd: 55, maxForce: 75,
-              landingTolerance: 0.055, landingSpeedTolerance: 0.45,
-              requiredTouchdownSubsteps: 4
-            });
-            swingStarted = true;
-            swingStartTime = frame / 60;
-          }
         }
       }
 
@@ -433,6 +445,10 @@ async function runClosedLoopUnloadScenario(page, options) {
           rightCaptureMargin: support?.capturePointMargin ?? null,
           rightComMargin: support?.comProjectionMargin ?? null,
           groundedFeet: state.groundedFeet,
+          rootUpright: state.rootUpright,
+          pelvisAngularVelocity: state.parts.find(part => part.name === 'pelvis')?.angularVelocity,
+          rightFootPosition: state.parts.find(part => part.name === 'foot_R')?.position,
+          leftFootPosition: state.parts.find(part => part.name === 'foot_L')?.position,
           footSwing: state.footSwing
         });
       }
@@ -1419,6 +1435,21 @@ try {
     targetCaptureMargin: 0.065, stableFramesRequired: 18,
     maxAngleRate: 0.45, swingDuration: 1.5,
     stepOffset: [0, 0, -0.10], lift: 0.08
+  });
+  const closedLoopUnloadStep320Adaptive = await runClosedLoopUnloadScenario(closedLoopUnloadPage, {
+    durationSeconds: 10, shiftStartSeconds: 2, maxAngle: -0.32,
+    targetCaptureMargin: 0.065, stableFramesRequired: 18,
+    maxAngleRate: 0.45, swingDuration: 1.5,
+    stepOffset: [0, 0, -0.10], lift: 0.08,
+    continueStanceFeedback: true
+  });
+  const closedLoopUnloadStep320Conservative = await runClosedLoopUnloadScenario(closedLoopUnloadPage, {
+    durationSeconds: 10, shiftStartSeconds: 2, maxAngle: -0.32,
+    targetCaptureMargin: 0.065, stableFramesRequired: 18,
+    maxAngleRate: 0.45, swingDuration: 2.4,
+    stepOffset: [0, 0, -0.06], lift: 0.04,
+    swingKp: 300, swingKd: 45, swingMaxForce: 60,
+    continueStanceFeedback: true
   });
   await closedLoopUnloadPage.close();
 
