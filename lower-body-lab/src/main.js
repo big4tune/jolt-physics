@@ -863,6 +863,8 @@ function configureFootSwing(config) {
     landingTolerance: Math.max(0.015, Number(config.landingTolerance ?? 0.055)),
     landingSpeedTolerance: Math.max(0.05, Number(config.landingSpeedTolerance ?? 0.45)),
     requiredTouchdownSubsteps: Math.max(1, Math.floor(Number(config.requiredTouchdownSubsteps ?? 4))),
+    preserveJointTargets: config.preserveJointTargets === true,
+    jointPosePdScale: THREE.MathUtils.clamp(Number(config.jointPosePdScale ?? 1), 0, 1),
     startPosition: null, targetPosition: null, started: false, lostContact: false,
     completed: false, completedAt: null, peakLift: 0, peakForce: 0,
     peakHipTorque: 0, peakKneeTorque: 0, phase: 0, positionError: 0,
@@ -891,6 +893,8 @@ function updateFootSwingController() {
       enabled: true, active: false, completed: true, side: swing.side, phase: 1,
       peakLift: swing.peakLift, peakForce: swing.peakForce,
       peakHipTorque: swing.peakHipTorque, peakKneeTorque: swing.peakKneeTorque,
+      preserveJointTargets: swing.preserveJointTargets,
+      jointPosePdScale: swing.jointPosePdScale,
       touchdownSubsteps: swing.touchdownSubsteps,
       landingError: swing.landingError, landingSpeed: swing.landingSpeed,
       landingPosition: swing.landingPosition ? swing.landingPosition.toArray() : null,
@@ -984,6 +988,8 @@ function updateFootSwingController() {
     peakLift: swing.peakLift, peakForce: swing.peakForce,
     hipTorque: hipTorque.toArray(), kneeTorque: kneeTorque.toArray(),
     peakHipTorque: swing.peakHipTorque, peakKneeTorque: swing.peakKneeTorque,
+    preserveJointTargets: swing.preserveJointTargets,
+    jointPosePdScale: swing.jointPosePdScale,
     touchdownSubsteps: swing.touchdownSubsteps,
     landingError: swing.landingError, landingSpeed: swing.landingSpeed,
     completedAt: swing.completedAt
@@ -1075,6 +1081,37 @@ function applyJointMuscleTorques(taskTorques = new Map()) {
     const taskTorque = taskTorques.get(joint.key);
     if (taskTorque) {
       torque.copy(taskTorque);
+
+      // Optional hybrid task-space + joint-space control for the swing chain.
+      // The Cartesian foot task alone can discard the pre-flexed knee/hip pose;
+      // a bounded pose servo keeps the leg in a useful configuration while
+      // the Jacobian-transpose term moves the foot.
+      const swing = currentFootSwing;
+      const preserveScale = swing && swing.preserveJointTargets
+        && (joint === swing.hip || joint === swing.knee)
+        ? swing.jointPosePdScale : 0;
+      if (preserveScale > 0) {
+        if (joint.isHinge) {
+          const angle = joint.constraint.GetCurrentAngle();
+          const axisWorld = joint.hingeAxisParentLocal.clone().applyQuaternion(parentQ).normalize();
+          const speed = relativeW.dot(axisWorld);
+          const poseTorque = joint.baseKp * kpScale * (joint.targetHingeAngle - angle)
+            - joint.baseKd * kdScale * speed;
+          torque.addScaledVector(axisWorld, poseTorque * preserveScale);
+        } else {
+          const desiredChild = parentQ.clone().multiply(joint.targetRelative);
+          const errorQ = desiredChild.multiply(childQ.clone().invert()).normalize();
+          if (errorQ.w < 0) errorQ.set(-errorQ.x, -errorQ.y, -errorQ.z, -errorQ.w);
+          const angle = 2 * Math.acos(THREE.MathUtils.clamp(errorQ.w, -1, 1));
+          const sinHalf = Math.sqrt(Math.max(0, 1 - errorQ.w * errorQ.w));
+          const axis = sinHalf < 1e-6
+            ? new THREE.Vector3()
+            : new THREE.Vector3(errorQ.x / sinHalf, errorQ.y / sinHalf, errorQ.z / sinHalf);
+          torque.addScaledVector(axis, angle * joint.baseKp * kpScale * preserveScale)
+            .addScaledVector(dampingW, -joint.baseKd * kdScale * preserveScale);
+        }
+      }
+
       const requested = torque.length();
       const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
       if (requested > maxTorque && requested > 1e-8) torque.multiplyScalar(maxTorque / requested);
