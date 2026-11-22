@@ -681,6 +681,7 @@ function createLowerBody() {
       anchorChildLocal: localAnchor2.clone(),
       targetRelative: defaultRelative.clone(),
       defaultRelative: defaultRelative.clone(),
+      worldTargetOffset: new THREE.Quaternion(),
       targetHingeAngle: 0,
       min: cfg.twistMin,
       max: cfg.twistMax,
@@ -834,7 +835,8 @@ function updateWorldReferencedTargets() {
     if (!useWorldReference) continue;
 
     const parentQ = readBodyRotation(joint.parent.bodyId);
-    joint.targetRelative.copy(parentQ.invert().multiply(uprightWorld)).normalize();
+    const desiredWorld = uprightWorld.clone().multiply(joint.worldTargetOffset);
+    joint.targetRelative.copy(parentQ.invert().multiply(desiredWorld)).normalize();
   }
 }
 
@@ -1484,6 +1486,7 @@ function resetSimulation() {
     // the next scenario even though every body has been returned to its
     // initial pose.
     joint.targetRelative.copy(joint.defaultRelative);
+    joint.worldTargetOffset.identity();
     joint.targetHingeAngle = 0;
     joint.extraWorldTorque.set(0, 0, 0);
     joint.orientationError = 0;
@@ -1566,6 +1569,16 @@ function installTestHooks() {
       if (!Object.prototype.hasOwnProperty.call(worldTargetMode, kind)) throw new Error('Unknown world target mode: ' + kind);
       worldTargetMode[kind] = !!enabled;
       for (const joint of joints) joint.targetRelative.copy(joint.defaultRelative);
+    },
+    setJointWorldTargetOffset: function (key, axis, angle) {
+      const joint = joints.find(candidate => candidate.key === key);
+      if (!joint) throw new Error('Unknown joint: ' + key);
+      if (joint.isHinge) throw new Error('World target offset requires a swing-twist joint: ' + key);
+      const worldAxis = new THREE.Vector3(Number(axis[0]), Number(axis[1]), Number(axis[2]));
+      if (worldAxis.lengthSq() < 1e-8) throw new Error('World target offset axis must be non-zero');
+      worldAxis.normalize();
+      joint.worldTargetOffset.setFromAxisAngle(worldAxis, Number(angle));
+      return joint.worldTargetOffset.toArray();
     },
     setJointTargetHingeAngle: function (key, angle) {
       const joint = joints.find(candidate => candidate.key === key);
