@@ -381,7 +381,12 @@ async function runPreflexThenSwingScenario(page, options) {
     const rampFrames = Math.max(1, Math.round((config.preflexRampSeconds ?? 1) * 60));
     const swingDuration = config.swingDuration ?? 1.8;
     const requiredStableFrames = config.stableFramesRequired ?? 18;
-    const minimumCaptureMargin = config.minimumCaptureMargin ?? 0.04;
+    const useStanceFeedback = config.stanceFeedback === true;
+    const stanceTargetCaptureMargin = config.stanceTargetCaptureMargin ?? 0.065;
+    const stanceMaxAngle = config.stanceMaxAngle ?? -0.32;
+    const stanceMaxAngleRate = config.stanceMaxAngleRate ?? 0.45;
+    const stanceFeedbackGain = config.stanceFeedbackGain ?? 0.55;
+    const minimumCaptureMargin = config.minimumCaptureMargin ?? (useStanceFeedback ? stanceTargetCaptureMargin : 0.04);
     const hipTarget = config.swingHipTarget ?? -0.35;
     const kneeTarget = config.swingKneeTarget ?? 0.90;
 
@@ -391,11 +396,23 @@ async function runPreflexThenSwingScenario(page, options) {
     let swingStartTime = null;
 
     for (let frame = 0; frame < totalFrames; frame += 1) {
-      if (frame >= shiftFrame && frame < shiftFrame + stanceShiftRampFrames) {
+      if (useStanceFeedback && frame >= shiftFrame && (!swingStarted || config.continueStanceFeedback !== false)) {
+        const rightSupport = state.balanceDiagnostics.footSupport.foot_R;
+        const margin = rightSupport?.capturePointMargin;
+        const feedbackPosture = state.pelvisY > 0.94 && state.pelvisUp > 0.88;
+        if (Number.isFinite(margin) && feedbackPosture) {
+          const error = stanceTargetCaptureMargin - margin;
+          const desiredAngle = Math.max(stanceMaxAngle, Math.min(0, stanceTargetAngle - error * stanceFeedbackGain));
+          const maxDelta = stanceMaxAngleRate / 60;
+          stanceTargetAngle += Math.max(-maxDelta, Math.min(maxDelta, desiredAngle - stanceTargetAngle));
+          api.setJointTargetRelativeRotation('pelvis->thigh_R', [0, 0, 1], stanceTargetAngle);
+        }
+      } else if (!useStanceFeedback && frame >= shiftFrame && frame < shiftFrame + stanceShiftRampFrames) {
         const linear = Math.min(1, (frame - shiftFrame + 1) / stanceShiftRampFrames);
         const ramp = linear * linear * (3 - 2 * linear);
+        stanceTargetAngle = (config.stanceHipTarget ?? -0.24) * ramp;
         api.setJointTargetRelativeRotation(
-          'pelvis->thigh_R', [0, 0, 1], (config.stanceHipTarget ?? -0.24) * ramp
+          'pelvis->thigh_R', [0, 0, 1], stanceTargetAngle
         );
       }
 
@@ -489,6 +506,10 @@ async function runPreflexThenSwingScenario(page, options) {
           leftFootContactPointCount: leftSupport?.contactPointCount ?? null,
           leftAnkleTargetRelative: leftAnkle?.targetRelative ?? null,
           rightCaptureMargin: rightSupport?.capturePointMargin ?? null,
+          rightFootContactPointCount: rightSupport?.contactPointCount ?? 0,
+          rightFootPosition: state.parts.find(part => part.name === 'foot_R')?.position ?? null,
+          comVelocity: state.comVelocity,
+          stanceTargetAngle,
           stableFrames,
           swingStarted,
           footSwing: state.footSwing,
@@ -497,7 +518,10 @@ async function runPreflexThenSwingScenario(page, options) {
       }
     }
 
-    return { final: state, samples, stableFrames, swingStarted, swingStartTime, hipTarget, kneeTarget };
+    return {
+      final: state, samples, stableFrames, swingStarted, swingStartTime, hipTarget, kneeTarget,
+      stanceTargetAngle, stanceFeedback: useStanceFeedback, stanceTargetCaptureMargin
+    };
   }, options);
 }
 
@@ -1731,6 +1755,39 @@ try {
     preflexStartSeconds: 4, preflexRampSeconds: 1,
     stanceHipTarget: -0.36, swingHipTarget: -0.35, swingKneeTarget: 0.90,
     minimumCaptureMargin: 0.04, stableFramesRequired: 18,
+    swingDuration: 2.4, stepOffset: [0, 0, -0.06], lift: 0.10,
+    swingKp: 300, swingKd: 45, swingMaxForce: 75,
+    preserveJointTargets: true, jointPosePdScale: 0.50,
+    swingKneePeak: 1.25, swingAnklePitch: -0.30
+  });
+  const preflexAnklePitchMinus030Feedback065 = await runPreflexThenSwingScenario(preflexSwingPage, {
+    durationSeconds: 14, shiftStartSeconds: 2, preflexStartSeconds: 4,
+    preflexRampSeconds: 1, stanceFeedback: true, stanceTargetCaptureMargin: 0.065,
+    stanceMaxAngle: -0.32, stanceMaxAngleRate: 0.45, stanceFeedbackGain: 0.55,
+    minimumCaptureMargin: 0.065, stableFramesRequired: 18,
+    swingHipTarget: -0.35, swingKneeTarget: 0.90,
+    swingDuration: 2.4, stepOffset: [0, 0, -0.06], lift: 0.10,
+    swingKp: 300, swingKd: 45, swingMaxForce: 75,
+    preserveJointTargets: true, jointPosePdScale: 0.50,
+    swingKneePeak: 1.25, swingAnklePitch: -0.30
+  });
+  const preflexAnklePitchMinus030Feedback080 = await runPreflexThenSwingScenario(preflexSwingPage, {
+    durationSeconds: 14, shiftStartSeconds: 2, preflexStartSeconds: 4,
+    preflexRampSeconds: 1, stanceFeedback: true, stanceTargetCaptureMargin: 0.08,
+    stanceMaxAngle: -0.36, stanceMaxAngleRate: 0.45, stanceFeedbackGain: 0.55,
+    minimumCaptureMargin: 0.08, stableFramesRequired: 18,
+    swingHipTarget: -0.35, swingKneeTarget: 0.90,
+    swingDuration: 2.4, stepOffset: [0, 0, -0.06], lift: 0.10,
+    swingKp: 300, swingKd: 45, swingMaxForce: 75,
+    preserveJointTargets: true, jointPosePdScale: 0.50,
+    swingKneePeak: 1.25, swingAnklePitch: -0.30
+  });
+  const preflexAnklePitchMinus030Feedback080Fast = await runPreflexThenSwingScenario(preflexSwingPage, {
+    durationSeconds: 14, shiftStartSeconds: 2, preflexStartSeconds: 4,
+    preflexRampSeconds: 1, stanceFeedback: true, stanceTargetCaptureMargin: 0.08,
+    stanceMaxAngle: -0.40, stanceMaxAngleRate: 0.65, stanceFeedbackGain: 0.85,
+    minimumCaptureMargin: 0.08, stableFramesRequired: 18,
+    swingHipTarget: -0.35, swingKneeTarget: 0.90,
     swingDuration: 2.4, stepOffset: [0, 0, -0.06], lift: 0.10,
     swingKp: 300, swingKd: 45, swingMaxForce: 75,
     preserveJointTargets: true, jointPosePdScale: 0.50,
