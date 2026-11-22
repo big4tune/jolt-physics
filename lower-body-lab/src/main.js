@@ -29,6 +29,9 @@ const ANKLE_TWIST_MIN_OVERRIDE = QUERY.has('ankle-twist-min')
 const ANKLE_TWIST_MAX_OVERRIDE = QUERY.has('ankle-twist-max')
   ? Math.max(-3.12, Math.min(3.12, Number(QUERY.get('ankle-twist-max'))))
   : null;
+const ANKLE_MAX_TORQUE_OVERRIDE = QUERY.has('ankle-max-torque')
+  ? Math.max(40, Math.min(400, Number(QUERY.get('ankle-max-torque'))))
+  : null;
 const HIP_SWING_OVERRIDE = QUERY.has('hip-swing')
   ? Math.max(0.05, Math.min(2.2, Number(QUERY.get('hip-swing'))))
   : null;
@@ -606,6 +609,7 @@ function createLowerBody() {
       if (ANKLE_PLANE_SWING_OVERRIDE !== null) cfg.planeSwing = ANKLE_PLANE_SWING_OVERRIDE;
       if (ANKLE_TWIST_MIN_OVERRIDE !== null) cfg.twistMin = ANKLE_TWIST_MIN_OVERRIDE;
       if (ANKLE_TWIST_MAX_OVERRIDE !== null) cfg.twistMax = ANKLE_TWIST_MAX_OVERRIDE;
+      if (ANKLE_MAX_TORQUE_OVERRIDE !== null) cfg.maxTorque = ANKLE_MAX_TORQUE_OVERRIDE;
       if (cfg.twistMin > cfg.twistMax) throw new Error('Ankle twist minimum must not exceed maximum');
     }
     const anchor = new THREE.Vector3(def.anchor[0], def.anchor[1], def.anchor[2]);
@@ -851,14 +855,18 @@ function configureFootSwing(config) {
     side, foot: partByName.get('foot_' + side), hip, knee,
     startTime: Math.max(0, Number(config.startTime ?? physicsTimeSeconds)),
     duration: Math.max(0.25, Number(config.duration ?? 0.9)),
-    offset: new THREE.Vector3(Number(config.offset?.[0] ?? 0), Number(config.offset?.[1] ?? 0), Number(config.offset?.[2] ?? 0.18)),
-    lift: Math.max(0.02, Number(config.lift ?? 0.14)),
-    kp: Math.max(50, Number(config.kp ?? 900)),
-    kd: Math.max(5, Number(config.kd ?? 75)),
-    maxForce: Math.max(20, Number(config.maxForce ?? 180)),
+    offset: new THREE.Vector3(Number(config.offset?.[0] ?? 0), Number(config.offset?.[1] ?? 0), Number(config.offset?.[2] ?? -0.12)),
+    lift: Math.max(0.02, Number(config.lift ?? 0.10)),
+    kp: Math.max(50, Number(config.kp ?? 500)),
+    kd: Math.max(5, Number(config.kd ?? 60)),
+    maxForce: Math.max(20, Number(config.maxForce ?? 90)),
+    landingTolerance: Math.max(0.015, Number(config.landingTolerance ?? 0.055)),
+    landingSpeedTolerance: Math.max(0.05, Number(config.landingSpeedTolerance ?? 0.45)),
+    requiredTouchdownSubsteps: Math.max(1, Math.floor(Number(config.requiredTouchdownSubsteps ?? 4))),
     startPosition: null, targetPosition: null, started: false, lostContact: false,
     completed: false, completedAt: null, peakLift: 0, peakForce: 0,
-    peakHipTorque: 0, peakKneeTorque: 0, phase: 0, positionError: 0
+    peakHipTorque: 0, peakKneeTorque: 0, phase: 0, positionError: 0,
+    touchdownSubsteps: 0, landingError: null, landingSpeed: null, landingPosition: null
   };
   lastFootSwingDiagnostics = { enabled: true, active: false, completed: false, side };
 }
@@ -883,6 +891,9 @@ function updateFootSwingController() {
       enabled: true, active: false, completed: true, side: swing.side, phase: 1,
       peakLift: swing.peakLift, peakForce: swing.peakForce,
       peakHipTorque: swing.peakHipTorque, peakKneeTorque: swing.peakKneeTorque,
+      touchdownSubsteps: swing.touchdownSubsteps,
+      landingError: swing.landingError, landingSpeed: swing.landingSpeed,
+      landingPosition: swing.landingPosition ? swing.landingPosition.toArray() : null,
       completedAt: swing.completedAt
     };
     return torques;
@@ -905,8 +916,13 @@ function updateFootSwingController() {
   const smoothRate = phase >= 1 ? 0 : 6 * phase * (1 - phase) / swing.duration;
   const target = swing.startPosition.clone().lerp(swing.targetPosition, smooth);
   const targetVelocity = swing.offset.clone().multiplyScalar(smoothRate);
-  target.y += swing.lift * Math.sin(Math.PI * phase);
-  targetVelocity.y += phase >= 1 ? 0 : swing.lift * Math.PI * Math.cos(Math.PI * phase) * smoothRate;
+
+  // Squared-sine clearance has zero vertical velocity at take-off and landing.
+  // A plain sine profile launches the foot with non-zero vertical speed at t=0.
+  const liftWave = Math.sin(Math.PI * phase);
+  target.y += swing.lift * liftWave * liftWave;
+  targetVelocity.y += phase >= 1 ? 0
+    : swing.lift * Math.PI * Math.sin(2 * Math.PI * phase) / swing.duration;
 
   const footPosition = readBodyPosition(swing.foot.bodyId);
   const footVelocity = readBodyLinearVelocity(swing.foot.bodyId);
@@ -942,10 +958,17 @@ function updateFootSwingController() {
   swing.peakHipTorque = Math.max(swing.peakHipTorque, hipTorque.length());
   swing.peakKneeTorque = Math.max(swing.peakKneeTorque, kneeTorque.length());
   swing.positionError = footPosition.distanceTo(target);
+  swing.landingError = footPosition.distanceTo(swing.targetPosition);
+  swing.landingSpeed = footVelocity.length();
+  swing.landingPosition = footPosition.clone();
 
-  // Do not call the initial stance contact a landing: a real lift-off must
-  // have occurred first, followed by a fresh contact after the swing phase.
-  if (phase >= 0.92 && swing.lostContact && hasContact) {
+  // Contact alone does not mean a successful step. Require lift-off, a landing
+  // near the requested foothold, low foot speed and persistent contact.
+  const landingReady = phase >= 0.96 && swing.lostContact && hasContact
+    && swing.landingError <= swing.landingTolerance
+    && swing.landingSpeed <= swing.landingSpeedTolerance;
+  swing.touchdownSubsteps = landingReady ? swing.touchdownSubsteps + 1 : 0;
+  if (swing.touchdownSubsteps >= swing.requiredTouchdownSubsteps) {
     swing.completed = true;
     swing.completedAt = physicsTimeSeconds;
     rebaseSwingJointTargets(swing);
@@ -955,11 +978,14 @@ function updateFootSwingController() {
   lastFootSwingDiagnostics = {
     enabled: true, active: !swing.completed, completed: swing.completed, side: swing.side,
     phase, waiting: false, lostContact: swing.lostContact, grounded: hasContact,
-    targetPosition: target.toArray(), actualPosition: footPosition.toArray(),
-    targetVelocity: targetVelocity.toArray(), force: force.toArray(),
-    positionError: swing.positionError, lift: liftNow, peakLift: swing.peakLift,
-    peakForce: swing.peakForce, hipTorque: hipTorque.toArray(), kneeTorque: kneeTorque.toArray(),
+    targetPosition: target.toArray(), landingTargetPosition: swing.targetPosition.toArray(),
+    actualPosition: footPosition.toArray(), targetVelocity: targetVelocity.toArray(),
+    force: force.toArray(), positionError: swing.positionError, lift: liftNow,
+    peakLift: swing.peakLift, peakForce: swing.peakForce,
+    hipTorque: hipTorque.toArray(), kneeTorque: kneeTorque.toArray(),
     peakHipTorque: swing.peakHipTorque, peakKneeTorque: swing.peakKneeTorque,
+    touchdownSubsteps: swing.touchdownSubsteps,
+    landingError: swing.landingError, landingSpeed: swing.landingSpeed,
     completedAt: swing.completedAt
   };
   return torques;
@@ -1258,6 +1284,7 @@ function updateBodyCache() {
       anklePlaneSwingOverride: ANKLE_PLANE_SWING_OVERRIDE,
       ankleTwistMinOverride: ANKLE_TWIST_MIN_OVERRIDE,
       ankleTwistMaxOverride: ANKLE_TWIST_MAX_OVERRIDE,
+      ankleMaxTorqueOverride: ANKLE_MAX_TORQUE_OVERRIDE,
       hipSwingOverride: HIP_SWING_OVERRIDE,
       hipPlaneSwingOverride: HIP_PLANE_SWING_OVERRIDE
     },
