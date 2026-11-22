@@ -2091,6 +2091,9 @@ try {
       preflexAnklePitchMinus030Hip028: preflexAnklePitchMinus030Hip028,
       preflexAnklePitchMinus030Hip032: preflexAnklePitchMinus030Hip032,
       preflexAnklePitchMinus030Hip036: preflexAnklePitchMinus030Hip036,
+      preflexAnklePitchMinus030Feedback065: preflexAnklePitchMinus030Feedback065,
+      preflexAnklePitchMinus030Feedback080: preflexAnklePitchMinus030Feedback080,
+      preflexAnklePitchMinus030Feedback080Fast: preflexAnklePitchMinus030Feedback080Fast,
       pinnedFeetRootImpulseAt5s: pinnedFeetRootImpulseAt5s
     },
     browserErrors: errors
