@@ -390,6 +390,7 @@ async function runPreflexThenSwingScenario(page, options) {
     const hipTarget = config.swingHipTarget ?? -0.35;
     const kneeTarget = config.swingKneeTarget ?? 0.90;
 
+    let stanceTargetAngle = 0;
     let state = api.snapshot();
     let stableFrames = 0;
     let swingStarted = false;
