@@ -1292,6 +1292,26 @@ function applyImpulse(name, x, y, z) {
   Jolt.destroy(impulse);
 }
 
+// Apply a world-space impulse at a point offset from the body's current COM.
+// This is a diagnostic hook for rotational disturbances: r x J must produce
+// angular velocity, unlike the center-of-mass impulse used by older tests.
+function applyImpulseAtOffset(name, x, y, z, offsetX, offsetY, offsetZ) {
+  const part = partByName.get(name);
+  if (!part) throw new Error('Unknown body: ' + name);
+  if (!part.isDynamic) throw new Error('Impulse target must be dynamic: ' + name);
+  const p = bodyInterface.GetPosition(part.bodyId);
+  const point = makeJoltRVec3(
+    p.GetX() + Number(offsetX),
+    p.GetY() + Number(offsetY),
+    p.GetZ() + Number(offsetZ)
+  );
+  const impulse = makeJoltVec3(Number(x), Number(y), Number(z));
+  bodyInterface.AddImpulse(part.bodyId, impulse, point);
+  bodyInterface.ActivateBody(part.bodyId);
+  Jolt.destroy(point);
+  Jolt.destroy(impulse);
+}
+
 function setMuscleStrength(value) {
   currentMuscleStrength = Math.max(0, Math.min(2.0, Number(value)));
   muscleSlider.value = String(Math.round(currentMuscleStrength * 100));
@@ -1364,6 +1384,7 @@ function installTestHooks() {
     },
     rebaseJointTargets: rebaseJointTargets,
     applyImpulse: applyImpulse,
+    applyImpulseAtOffset: applyImpulseAtOffset,
     anchorError: window.__lowerBodyAnchorError
   };
 }
