@@ -359,6 +359,107 @@ async function runFootSwingScenario(page, options) {
 }
 
 
+async function runPreflexThenSwingScenario(page, options) {
+  await page.evaluate(config => {
+    const api = window.__lowerBodyTest;
+    api.reset();
+    api.setMuscleStrength(config.strength ?? 1);
+    api.setStiffness(config.stiffness ?? 2);
+    api.setDamping(config.damping ?? 0.8);
+    api.setWorldTargetMode('hip', false);
+    api.setWorldTargetMode('ankle', true);
+    api.setRootUprightController(true, 1, 400, 40, 380);
+  }, options);
+
+  return page.evaluate(config => {
+    const api = window.__lowerBodyTest;
+    const samples = [];
+    const totalFrames = Math.round((config.durationSeconds ?? 10) * 60);
+    const shiftFrame = Math.round((config.shiftStartSeconds ?? 2) * 60);
+    const preflexFrame = Math.round((config.preflexStartSeconds ?? 4) * 60);
+    const rampFrames = Math.max(1, Math.round((config.preflexRampSeconds ?? 1) * 60));
+    const swingDuration = config.swingDuration ?? 1.8;
+    const requiredStableFrames = config.stableFramesRequired ?? 18;
+    const minimumCaptureMargin = config.minimumCaptureMargin ?? 0.04;
+    const hipTarget = config.swingHipTarget ?? -0.35;
+    const kneeTarget = config.swingKneeTarget ?? 0.90;
+
+    let state = api.snapshot();
+    let stableFrames = 0;
+    let swingStarted = false;
+    let swingStartTime = null;
+
+    for (let frame = 0; frame < totalFrames; frame += 1) {
+      if (frame === shiftFrame) {
+        api.setJointTargetRelativeRotation('pelvis->thigh_R', [0, 0, 1], config.stanceHipTarget ?? -0.24);
+      }
+
+      if (frame >= preflexFrame && frame < preflexFrame + rampFrames) {
+        const linear = Math.min(1, (frame - preflexFrame + 1) / rampFrames);
+        const ramp = linear * linear * (3 - 2 * linear);
+        api.setJointTargetRelativeRotation('pelvis->thigh_L', [1, 0, 0], hipTarget * ramp);
+        api.setJointTargetHingeAngle('thigh_L->shin_L', kneeTarget * ramp);
+      }
+
+      if (!swingStarted && frame >= preflexFrame + rampFrames) {
+        const rightSupport = state.balanceDiagnostics.footSupport.foot_R;
+        const knee = state.joints.find(joint => joint.key === 'thigh_L->shin_L');
+        const bothGrounded = state.groundedFeet.includes('foot_L') && state.groundedFeet.includes('foot_R');
+        const safePosture = state.pelvisY > 1.0 && state.pelvisUp > 0.96;
+        const kneePrepared = Number.isFinite(knee?.angle) && knee.angle >= kneeTarget * 0.80;
+        const margin = rightSupport?.capturePointMargin;
+
+        if (bothGrounded && safePosture && kneePrepared && Number.isFinite(margin) && margin >= minimumCaptureMargin) {
+          stableFrames += 1;
+        } else {
+          stableFrames = 0;
+        }
+
+        if (stableFrames >= requiredStableFrames) {
+          api.configureFootSwing({
+            side: 'L',
+            startTime: frame / 60,
+            duration: swingDuration,
+            offset: config.stepOffset ?? [0, 0, -0.06],
+            lift: config.lift ?? 0.06,
+            kp: config.swingKp ?? 450,
+            kd: config.swingKd ?? 55,
+            maxForce: config.swingMaxForce ?? 75,
+            landingTolerance: 0.055,
+            landingSpeedTolerance: 0.45,
+            requiredTouchdownSubsteps: 4
+          });
+          swingStarted = true;
+          swingStartTime = frame / 60;
+        }
+      }
+
+      state = api.step(1);
+      if (frame % 2 === 0 || frame === totalFrames - 1) {
+        const knee = state.joints.find(joint => joint.key === 'thigh_L->shin_L');
+        const rightSupport = state.balanceDiagnostics.footSupport.foot_R;
+        const leftFoot = state.parts.find(part => part.name === 'foot_L');
+        samples.push({
+          time: state.time,
+          pelvisY: state.pelvisY,
+          pelvisUp: state.pelvisUp,
+          groundedFeet: state.groundedFeet,
+          leftKneeAngle: knee?.angle ?? null,
+          leftFootPosition: leftFoot?.position ?? null,
+          rightCaptureMargin: rightSupport?.capturePointMargin ?? null,
+          stableFrames,
+          swingStarted,
+          footSwing: state.footSwing,
+          rootUpright: state.rootUpright
+        });
+      }
+    }
+
+    return { final: state, samples, stableFrames, swingStarted, swingStartTime, hipTarget, kneeTarget };
+  }, options);
+}
+
+
 async function runClosedLoopUnloadScenario(page, options) {
   await page.evaluate(config => {
     const api = window.__lowerBodyTest;
@@ -1451,6 +1552,23 @@ try {
     swingKp: 300, swingKd: 45, swingMaxForce: 60,
     continueStanceFeedback: true
   });
+  const preflexSwingPage = await openLab('&substeps=8&ankle-twist-min=-2.4&ankle-twist-max=2.4&root-mode=ankle-pair&hip-swing=1.25&ankle-max-torque=180');
+  const preflexSwingShort = await runPreflexThenSwingScenario(preflexSwingPage, {
+    durationSeconds: 10, shiftStartSeconds: 2, preflexStartSeconds: 4,
+    preflexRampSeconds: 1, stanceHipTarget: -0.24,
+    swingHipTarget: -0.35, swingKneeTarget: 0.90,
+    minimumCaptureMargin: 0.04, stableFramesRequired: 18,
+    swingDuration: 1.8, stepOffset: [0, 0, -0.06], lift: 0.06
+  });
+  const preflexSwingMedium = await runPreflexThenSwingScenario(preflexSwingPage, {
+    durationSeconds: 10, shiftStartSeconds: 2, preflexStartSeconds: 4,
+    preflexRampSeconds: 1, stanceHipTarget: -0.24,
+    swingHipTarget: -0.35, swingKneeTarget: 0.90,
+    minimumCaptureMargin: 0.04, stableFramesRequired: 18,
+    swingDuration: 1.8, stepOffset: [0, 0, -0.10], lift: 0.06
+  });
+  await preflexSwingPage.close();
+
   await closedLoopUnloadPage.close();
 
   const footSwingLowTorquePage = await openLab('&substeps=8&ankle-twist-min=-2.4&ankle-twist-max=2.4&root-mode=ankle-pair&hip-swing=1.25&ankle-max-torque=105');
@@ -1530,7 +1648,7 @@ try {
   });
   await pinnedPage.close();
 
-  const finalStates = [footSwingLiftOnly.final, footSwingForwardShort.final, footSwingForwardMedium.final, footSwingForwardMediumLowTorque.final, closedLoopUnloadStep.final, closedLoopUnloadStep320Adaptive.final, closedLoopUnloadStep320Conservative.final, weightShiftMinus024.final, weightShiftMinus032.final, weightShiftMinus040.final, anklePairPitchImpulse14Offset.final, anklePairRollImpulse14Offset.final, anklePairSwingKnee110.final, anklePairSwingKnee130.final, anklePairSwingKnee145.final, anklePairSwingLongerReach.final, passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRoot20_5_50_30s.final, pinnedFeetRoot35_8_70_30s.final, pinnedFeetRoot60_12_100_30s.final, pinnedFeetRoot35_8_70Delayed30s.final, pinnedFeetRoot35_8_70Disturbance15s.final, freeFeetRoot20_5_50_30s.final, freeFeetRoot35_8_70_30s.final, freeFeetRoot35_8_70AnkleWorld30s.final, freeFeetRoot35_8_70HipAnkleWorld30s.final, pinnedFeetRootImpulseAt5s.final, dynamicFeetStiffness050Damping01030s.final, dynamicFeetStiffness025Damping01030s.final, dynamicFeetStiffness025Damping00530s.final, dynamicFeetStiffness010Damping00530s.final, dynamicFeetStiffness025Damping010Root20_5_30s.final, dynamicFeetRoot35_8_70LowGain.final, dynamicFeetRoot60_12_100LowGain.final, dynamicFeetRoot90_18_140LowGain.final, dynamicFeetRoot120_24_180LowGain.final, dynamicFeetRoot60_12_100HipWorld.final, dynamicFeetRoot60_12_100AnkleWorld.final, dynamicFeetRoot60_12_100BothWorld.final, dynamicFeetRootDisturbance.final, substeps2Root60AnkleWorld.final, substeps2Root90AnkleWorld.final, substeps4Root60AnkleWorld.final, substeps4Root90AnkleWorld.final, substeps8Root60AnkleWorld.final, substeps8Root180_22.final, substeps8Root300_30.final, substeps8Root450_40.final, substeps8Root300_30Disturbance.final, footPlantRoot180_22.final, footPlantRoot300_30.final, footPlantRoot450_40.final, footPlantRoot300_30Disturbance.final, footPlantRoot300_30_60s.final, footPlantRoot300_30Forward2Ns.final, footPlantRoot300_30Side2Ns.final, footPlantRoot300_30Forward4Ns.final, footPlant2500_110.final, footPlant2500_110Forward2Ns.final, freeFeetNoPlantRoot300.final, contactPlantStable60s.final, contactPlantPush2Ns.final, contactPlantPush4Ns.final, contactPlantFootLift.final, contactPlantSoft20s.final, contactAnkleSwing035.final, contactAnkleSwing070.final, contactAnkleSwing120.final, contactAnkleSwing165.final, contactAnkleSwing165StrongRoot.final, contactAnkleTwistMedium.final, contactAnkleTwistWide.final, contactAnkleTwistWideStrongPD.final, freeAnkleTwistWideStrongPD.final, contactHipSwing095.final, contactHipSwing125.final, contactHipSwing125Both.final, hipWorldAnkleWorldContactNoRoot.final, hipWorldAnkleWorldContactRoot.final, hipLocalAnkleWorldContactNoRoot.final, hipWorldAnkleWorldFreeNoRoot.final, hipWorldAnkleWorldFreeRoot.final, directRootContact.final, directRootContactLowPD.final, directRootFree.final, hipFreeContact066.final, hipFreeContact095.final, hipFreeContact095LowerRoot.final, hipFreeNoPlant.final, ankleLocalContactWide.final, ankleLocalContactWideStrongPD.final, ankleLocalContactWideMaxPD.final, ankleWorldContactWideControl.final, ankleLocalFreeWideStrongPD.final, directRootContactStrongPD.final, directRootContactMaxPD.final, anklePairFreeMaxPD.final, anklePairContactStrongPD.final, anklePairContactMaxPD.final, anklePairContactLocalAnkle.final, anklePairContactMaxPD60s.final, anklePairContactDisturbance.final, anklePairFreeStable60s.final, anklePairFreePush2Ns.final, anklePairFreePush4Ns.final, anklePairFreeSide2Ns.final, anklePairFreeFootLift2Ns.final, anklePairFootLift4NsTrace.final, anklePairStepHipNegative.final, anklePairStepHipPositive.final, anklePairStepResetAfterTarget.final, anklePairLateralHipZPlus008.final, anklePairLateralHipZMinus008.final, anklePairLateralHipZPlus016.final, anklePairLateralHipZMinus016.final, anklePairLateralHipZMinus024.final, anklePairLateralHipZMinus032.final, anklePairWeightShiftStep024.final, anklePairWeightShiftStep032.final, anklePairStepHipNeg020Ramp05.final, anklePairStepKneeOnlyRamp05.final, anklePairStepHipNeg035Ramp05.final, anklePairStepHipPos020Ramp05.final, anklePairStepHipNeg035Ramp10.final];
+  const finalStates = [footSwingLiftOnly.final, footSwingForwardShort.final, footSwingForwardMedium.final, footSwingForwardMediumLowTorque.final, closedLoopUnloadStep.final, closedLoopUnloadStep320Adaptive.final, closedLoopUnloadStep320Conservative.final, preflexSwingShort.final, preflexSwingMedium.final, weightShiftMinus024.final, weightShiftMinus032.final, weightShiftMinus040.final, anklePairPitchImpulse14Offset.final, anklePairRollImpulse14Offset.final, anklePairSwingKnee110.final, anklePairSwingKnee130.final, anklePairSwingKnee145.final, anklePairSwingLongerReach.final, passive.final, baseline.final, stronger.final, hipDisabled.final, kneeDisabled.final, ankleDisabled.final, hipWorldTarget.final, ankleWorldTarget.final, hipAnkleWorldTarget.final, hipWorldTargetReversed.final, ankleWorldTargetReversed.final, hipAnkleWorldTargetReversedHip.final, hipAnkleWorldTargetReversedBoth.final, rootUpright15s.final, rootUprightReversed8s.final, rootUprightStrong15s.final, rootUprightPlusAnkle15s.final, impulse.final, pinnedFeetBaseline.final, pinnedFeetRootUpright.final, pinnedFeetRoot220_40_30s.final, pinnedFeetRoot300_60_30s.final, pinnedFeetRoot140_36_30s.final, pinnedFeetRoot20_5_50_30s.final, pinnedFeetRoot35_8_70_30s.final, pinnedFeetRoot60_12_100_30s.final, pinnedFeetRoot35_8_70Delayed30s.final, pinnedFeetRoot35_8_70Disturbance15s.final, freeFeetRoot20_5_50_30s.final, freeFeetRoot35_8_70_30s.final, freeFeetRoot35_8_70AnkleWorld30s.final, freeFeetRoot35_8_70HipAnkleWorld30s.final, pinnedFeetRootImpulseAt5s.final, dynamicFeetStiffness050Damping01030s.final, dynamicFeetStiffness025Damping01030s.final, dynamicFeetStiffness025Damping00530s.final, dynamicFeetStiffness010Damping00530s.final, dynamicFeetStiffness025Damping010Root20_5_30s.final, dynamicFeetRoot35_8_70LowGain.final, dynamicFeetRoot60_12_100LowGain.final, dynamicFeetRoot90_18_140LowGain.final, dynamicFeetRoot120_24_180LowGain.final, dynamicFeetRoot60_12_100HipWorld.final, dynamicFeetRoot60_12_100AnkleWorld.final, dynamicFeetRoot60_12_100BothWorld.final, dynamicFeetRootDisturbance.final, substeps2Root60AnkleWorld.final, substeps2Root90AnkleWorld.final, substeps4Root60AnkleWorld.final, substeps4Root90AnkleWorld.final, substeps8Root60AnkleWorld.final, substeps8Root180_22.final, substeps8Root300_30.final, substeps8Root450_40.final, substeps8Root300_30Disturbance.final, footPlantRoot180_22.final, footPlantRoot300_30.final, footPlantRoot450_40.final, footPlantRoot300_30Disturbance.final, footPlantRoot300_30_60s.final, footPlantRoot300_30Forward2Ns.final, footPlantRoot300_30Side2Ns.final, footPlantRoot300_30Forward4Ns.final, footPlant2500_110.final, footPlant2500_110Forward2Ns.final, freeFeetNoPlantRoot300.final, contactPlantStable60s.final, contactPlantPush2Ns.final, contactPlantPush4Ns.final, contactPlantFootLift.final, contactPlantSoft20s.final, contactAnkleSwing035.final, contactAnkleSwing070.final, contactAnkleSwing120.final, contactAnkleSwing165.final, contactAnkleSwing165StrongRoot.final, contactAnkleTwistMedium.final, contactAnkleTwistWide.final, contactAnkleTwistWideStrongPD.final, freeAnkleTwistWideStrongPD.final, contactHipSwing095.final, contactHipSwing125.final, contactHipSwing125Both.final, hipWorldAnkleWorldContactNoRoot.final, hipWorldAnkleWorldContactRoot.final, hipLocalAnkleWorldContactNoRoot.final, hipWorldAnkleWorldFreeNoRoot.final, hipWorldAnkleWorldFreeRoot.final, directRootContact.final, directRootContactLowPD.final, directRootFree.final, hipFreeContact066.final, hipFreeContact095.final, hipFreeContact095LowerRoot.final, hipFreeNoPlant.final, ankleLocalContactWide.final, ankleLocalContactWideStrongPD.final, ankleLocalContactWideMaxPD.final, ankleWorldContactWideControl.final, ankleLocalFreeWideStrongPD.final, directRootContactStrongPD.final, directRootContactMaxPD.final, anklePairFreeMaxPD.final, anklePairContactStrongPD.final, anklePairContactMaxPD.final, anklePairContactLocalAnkle.final, anklePairContactMaxPD60s.final, anklePairContactDisturbance.final, anklePairFreeStable60s.final, anklePairFreePush2Ns.final, anklePairFreePush4Ns.final, anklePairFreeSide2Ns.final, anklePairFreeFootLift2Ns.final, anklePairFootLift4NsTrace.final, anklePairStepHipNegative.final, anklePairStepHipPositive.final, anklePairStepResetAfterTarget.final, anklePairLateralHipZPlus008.final, anklePairLateralHipZMinus008.final, anklePairLateralHipZPlus016.final, anklePairLateralHipZMinus016.final, anklePairLateralHipZMinus024.final, anklePairLateralHipZMinus032.final, anklePairWeightShiftStep024.final, anklePairWeightShiftStep032.final, anklePairStepHipNeg020Ramp05.final, anklePairStepKneeOnlyRamp05.final, anklePairStepHipNeg035Ramp05.final, anklePairStepHipPos020Ramp05.final, anklePairStepHipNeg035Ramp10.final];
   for (const state of finalStates) {
     assert.ok(Number.isFinite(state.pelvisY), 'Physics returned a non-finite pelvis position');
     assert.ok(state.parts.every(part => part.position.every(Number.isFinite)), 'Physics returned a non-finite body position');
@@ -1731,6 +1849,8 @@ try {
       closedLoopUnloadStep320: closedLoopUnloadStep320,
       closedLoopUnloadStep320Adaptive: closedLoopUnloadStep320Adaptive,
       closedLoopUnloadStep320Conservative: closedLoopUnloadStep320Conservative,
+      preflexSwingShort: preflexSwingShort,
+      preflexSwingMedium: preflexSwingMedium,
       pinnedFeetRootImpulseAt5s: pinnedFeetRootImpulseAt5s
     },
     browserErrors: errors
@@ -1769,6 +1889,13 @@ try {
     assert.ok(unloadProbe.samples.every(sample =>
       sample.targetAngle >= unloadProbe.maxAngle - 0.000001 && sample.targetAngle <= 0.000001
     ), name + ' must respect its configured bounded hip target');
+  }
+
+  for (const name of ['preflexSwingShort', 'preflexSwingMedium']) {
+    const probe = report.scenarios[name];
+    assert.ok(probe.samples.length > 0, name + ' must emit preflex/swing samples');
+    assert.ok(probe.samples.every(sample => Number.isFinite(sample.pelvisY) && Number.isFinite(sample.pelvisUp)), name + ' posture samples must remain finite');
+    assert.ok(probe.samples.every(sample => sample.leftFootPosition && sample.leftFootPosition.every(Number.isFinite)), name + ' must report finite swing-foot positions');
   }
 
   const anklePairProbe = report.scenarios.anklePairContactMaxPD.final;
