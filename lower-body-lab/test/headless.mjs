@@ -439,7 +439,7 @@ async function runClosedLoopUnloadScenario(page, options) {
     }
     return {
       final: state, samples, targetAngle, stableFrames, swingStarted,
-      swingStartTime, abortReason, targetCaptureMargin: targetMargin
+      swingStartTime, abortReason, maxAngle, targetCaptureMargin: targetMargin
     };
   }, options);
 }
@@ -1408,6 +1408,18 @@ try {
     maxAngleRate: 0.45, swingDuration: 1.5,
     stepOffset: [0, 0, -0.10], lift: 0.08
   });
+  const closedLoopUnloadStep300 = await runClosedLoopUnloadScenario(closedLoopUnloadPage, {
+    durationSeconds: 10, shiftStartSeconds: 2, maxAngle: -0.30,
+    targetCaptureMargin: 0.065, stableFramesRequired: 18,
+    maxAngleRate: 0.45, swingDuration: 1.5,
+    stepOffset: [0, 0, -0.10], lift: 0.08
+  });
+  const closedLoopUnloadStep320 = await runClosedLoopUnloadScenario(closedLoopUnloadPage, {
+    durationSeconds: 10, shiftStartSeconds: 2, maxAngle: -0.32,
+    targetCaptureMargin: 0.065, stableFramesRequired: 18,
+    maxAngleRate: 0.45, swingDuration: 1.5,
+    stepOffset: [0, 0, -0.10], lift: 0.08
+  });
   await closedLoopUnloadPage.close();
 
   const footSwingLowTorquePage = await openLab('&substeps=8&ankle-twist-min=-2.4&ankle-twist-max=2.4&root-mode=ankle-pair&hip-swing=1.25&ankle-max-torque=105');
@@ -1684,6 +1696,8 @@ try {
       footSwingForwardMedium: footSwingForwardMedium,
       footSwingForwardMediumLowTorque: footSwingForwardMediumLowTorque,
       closedLoopUnloadStep: closedLoopUnloadStep,
+      closedLoopUnloadStep300: closedLoopUnloadStep300,
+      closedLoopUnloadStep320: closedLoopUnloadStep320,
       pinnedFeetRootImpulseAt5s: pinnedFeetRootImpulseAt5s
     },
     browserErrors: errors
@@ -1713,14 +1727,16 @@ try {
     }
   }
 
-  const unloadProbe = report.scenarios.closedLoopUnloadStep;
-  assert.ok(unloadProbe.samples.length > 0, 'Closed-loop unload must emit control samples');
-  assert.ok(unloadProbe.samples.every(sample =>
-    Number.isFinite(sample.targetAngle) && Number.isFinite(sample.pelvisY)
-  ), 'Closed-loop unload diagnostics must remain finite');
-  assert.ok(unloadProbe.samples.every(sample =>
-    sample.targetAngle >= -0.270001 && sample.targetAngle <= 0.000001
-  ), 'Closed-loop unload must respect its bounded hip target');
+  for (const name of ['closedLoopUnloadStep', 'closedLoopUnloadStep300', 'closedLoopUnloadStep320']) {
+    const unloadProbe = report.scenarios[name];
+    assert.ok(unloadProbe.samples.length > 0, name + ' must emit control samples');
+    assert.ok(unloadProbe.samples.every(sample =>
+      Number.isFinite(sample.targetAngle) && Number.isFinite(sample.pelvisY)
+    ), name + ' diagnostics must remain finite');
+    assert.ok(unloadProbe.samples.every(sample =>
+      sample.targetAngle >= unloadProbe.maxAngle - 0.000001 && sample.targetAngle <= 0.000001
+    ), name + ' must respect its configured bounded hip target');
+  }
 
   const anklePairProbe = report.scenarios.anklePairContactMaxPD.final;
   assert.equal(anklePairProbe.rootUpright.mode, 'ankle-pair', 'Ankle-pair experiment should use its requested actuator route');
