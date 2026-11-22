@@ -74,6 +74,10 @@ let simulationReady = false;
 let accumulator = 0;
 let lastFrameTime = 0;
 let testStepCount = 0;
+let physicsTimeSeconds = 0;
+let currentFootSwing = null;
+let lastFootSwingDiagnostics = { enabled: false, active: false, completed: false };
+let activeSwingTorques = new Map();
 let currentMuscleStrength = Number(muscleSlider.value) / 100;
 let controllerStiffness = Number(stiffnessSlider.value) / 100;
 let controllerDamping = 1.0;
@@ -669,6 +673,8 @@ function createLowerBody() {
       constraint: constraint,
       isHinge: isHinge,
       hingeAxisParentLocal: localTwist1.clone(),
+      anchorParentLocal: localAnchor1.clone(),
+      anchorChildLocal: localAnchor2.clone(),
       targetRelative: defaultRelative.clone(),
       defaultRelative: defaultRelative.clone(),
       targetHingeAngle: 0,
@@ -828,6 +834,137 @@ function updateWorldReferencedTargets() {
   }
 }
 
+function clampVectorLength(vector, maximum) {
+  const length = vector.length();
+  if (length > maximum && length > 1e-8) vector.multiplyScalar(maximum / length);
+  return vector;
+}
+
+function configureFootSwing(config) {
+  const side = config.side === 'R' ? 'R' : 'L';
+  const hip = joints.find(joint => joint.key === 'pelvis->thigh_' + side);
+  const knee = joints.find(joint => joint.key === 'thigh_' + side + '->shin_' + side);
+  const ankle = joints.find(joint => joint.key === 'shin_' + side + '->foot_' + side);
+  if (!hip || !knee || !ankle || !knee.isHinge) throw new Error('Invalid swing-leg chain: ' + side);
+
+  currentFootSwing = {
+    side, foot: partByName.get('foot_' + side), hip, knee,
+    startTime: Math.max(0, Number(config.startTime ?? physicsTimeSeconds)),
+    duration: Math.max(0.25, Number(config.duration ?? 0.9)),
+    offset: new THREE.Vector3(Number(config.offset?.[0] ?? 0), Number(config.offset?.[1] ?? 0), Number(config.offset?.[2] ?? 0.18)),
+    lift: Math.max(0.02, Number(config.lift ?? 0.14)),
+    kp: Math.max(50, Number(config.kp ?? 900)),
+    kd: Math.max(5, Number(config.kd ?? 75)),
+    maxForce: Math.max(20, Number(config.maxForce ?? 180)),
+    startPosition: null, targetPosition: null, started: false, lostContact: false,
+    completed: false, completedAt: null, peakLift: 0, peakForce: 0,
+    peakHipTorque: 0, peakKneeTorque: 0, phase: 0, positionError: 0
+  };
+  lastFootSwingDiagnostics = { enabled: true, active: false, completed: false, side };
+}
+
+function rebaseSwingJointTargets(swing) {
+  const parentQ = readBodyRotation(swing.hip.parent.bodyId);
+  const childQ = readBodyRotation(swing.hip.child.bodyId);
+  swing.hip.targetRelative.copy(parentQ.clone().invert().multiply(childQ).normalize());
+  swing.knee.targetHingeAngle = swing.knee.constraint.GetCurrentAngle();
+}
+
+function updateFootSwingController() {
+  const torques = new Map();
+  activeSwingTorques = torques;
+  const swing = currentFootSwing;
+  if (!swing) {
+    lastFootSwingDiagnostics = { enabled: false, active: false, completed: false };
+    return torques;
+  }
+  if (swing.completed) {
+    lastFootSwingDiagnostics = {
+      enabled: true, active: false, completed: true, side: swing.side, phase: 1,
+      peakLift: swing.peakLift, peakForce: swing.peakForce,
+      peakHipTorque: swing.peakHipTorque, peakKneeTorque: swing.peakKneeTorque,
+      completedAt: swing.completedAt
+    };
+    return torques;
+  }
+  if (physicsTimeSeconds < swing.startTime) {
+    lastFootSwingDiagnostics = { enabled: true, active: false, completed: false, side: swing.side, phase: 0, waiting: true };
+    return torques;
+  }
+
+  if (!swing.started) {
+    swing.startPosition = readBodyPosition(swing.foot.bodyId);
+    swing.targetPosition = swing.startPosition.clone().add(swing.offset);
+    swing.started = true;
+  }
+
+  const elapsed = Math.max(0, physicsTimeSeconds - swing.startTime);
+  const phase = THREE.MathUtils.clamp(elapsed / swing.duration, 0, 1);
+  swing.phase = phase;
+  const smooth = phase * phase * (3 - 2 * phase);
+  const smoothRate = phase >= 1 ? 0 : 6 * phase * (1 - phase) / swing.duration;
+  const target = swing.startPosition.clone().lerp(swing.targetPosition, smooth);
+  const targetVelocity = swing.offset.clone().multiplyScalar(smoothRate);
+  target.y += swing.lift * Math.sin(Math.PI * phase);
+  targetVelocity.y += phase >= 1 ? 0 : swing.lift * Math.PI * Math.cos(Math.PI * phase) * smoothRate;
+
+  const footPosition = readBodyPosition(swing.foot.bodyId);
+  const footVelocity = readBodyLinearVelocity(swing.foot.bodyId);
+  const hasContact = liveContactPairs.has(makeContactPairKey(floorBodyKey, swing.foot.bodyKey));
+  if (phase > 0.06 && !hasContact) swing.lostContact = true;
+
+  const force = target.clone().sub(footPosition).multiplyScalar(swing.kp)
+    .addScaledVector(targetVelocity.clone().sub(footVelocity), swing.kd);
+  clampVectorLength(force, swing.maxForce);
+
+  // Task-space PD force mapped to joint torques with the Jacobian transpose.
+  const hipParentQ = readBodyRotation(swing.hip.parent.bodyId);
+  const hipAnchor = readBodyPosition(swing.hip.parent.bodyId)
+    .add(swing.hip.anchorParentLocal.clone().applyQuaternion(hipParentQ));
+  const hipTorque = footPosition.clone().sub(hipAnchor).cross(force);
+
+  const kneeParentQ = readBodyRotation(swing.knee.parent.bodyId);
+  const kneeAnchor = readBodyPosition(swing.knee.parent.bodyId)
+    .add(swing.knee.anchorParentLocal.clone().applyQuaternion(kneeParentQ));
+  const kneeAxis = swing.knee.hingeAxisParentLocal.clone().applyQuaternion(kneeParentQ).normalize();
+  const kneeTorque = kneeAxis.multiplyScalar(
+    footPosition.clone().sub(kneeAnchor).cross(force).dot(kneeAxis)
+  );
+
+  clampVectorLength(hipTorque, swing.hip.baseMaxTorque * currentMuscleStrength * jointTorqueScale.hip);
+  clampVectorLength(kneeTorque, swing.knee.baseMaxTorque * currentMuscleStrength * jointTorqueScale.knee);
+  torques.set(swing.hip.key, hipTorque);
+  torques.set(swing.knee.key, kneeTorque);
+
+  const liftNow = Math.max(0, footPosition.y - swing.startPosition.y);
+  swing.peakLift = Math.max(swing.peakLift, liftNow);
+  swing.peakForce = Math.max(swing.peakForce, force.length());
+  swing.peakHipTorque = Math.max(swing.peakHipTorque, hipTorque.length());
+  swing.peakKneeTorque = Math.max(swing.peakKneeTorque, kneeTorque.length());
+  swing.positionError = footPosition.distanceTo(target);
+
+  // Do not call the initial stance contact a landing: a real lift-off must
+  // have occurred first, followed by a fresh contact after the swing phase.
+  if (phase >= 0.92 && swing.lostContact && hasContact) {
+    swing.completed = true;
+    swing.completedAt = physicsTimeSeconds;
+    rebaseSwingJointTargets(swing);
+    torques.clear();
+  }
+
+  lastFootSwingDiagnostics = {
+    enabled: true, active: !swing.completed, completed: swing.completed, side: swing.side,
+    phase, waiting: false, lostContact: swing.lostContact, grounded: hasContact,
+    targetPosition: target.toArray(), actualPosition: footPosition.toArray(),
+    targetVelocity: targetVelocity.toArray(), force: force.toArray(),
+    positionError: swing.positionError, lift: liftNow, peakLift: swing.peakLift,
+    peakForce: swing.peakForce, hipTorque: hipTorque.toArray(), kneeTorque: kneeTorque.toArray(),
+    peakHipTorque: swing.peakHipTorque, peakKneeTorque: swing.peakKneeTorque,
+    completedAt: swing.completedAt
+  };
+  return torques;
+}
+
 function updateRootUprightMoment() {
   for (const joint of joints) joint.extraWorldTorque.set(0, 0, 0);
   lastRootUprightTorque.set(0, 0, 0);
@@ -883,7 +1020,7 @@ function updateRootUprightMoment() {
   }
 }
 
-function applyJointMuscleTorques() {
+function applyJointMuscleTorques(taskTorques = new Map()) {
   torqueStats.maxRequested = 0;
   torqueStats.maxApplied = 0;
   torqueStats.saturated = 0;
@@ -909,7 +1046,17 @@ function applyJointMuscleTorques() {
     const dampingW = usesWorldTarget ? childWorldW : relativeW;
 
     let torque = new THREE.Vector3();
-    if (joint.isHinge) {
+    const taskTorque = taskTorques.get(joint.key);
+    if (taskTorque) {
+      torque.copy(taskTorque);
+      const requested = torque.length();
+      const maxTorque = joint.baseMaxTorque * strength * jointTorqueScale[joint.type];
+      if (requested > maxTorque && requested > 1e-8) torque.multiplyScalar(maxTorque / requested);
+      joint.orientationError = 0;
+      joint.requestedTorque = requested;
+      joint.appliedTorque = Math.min(requested, maxTorque);
+      if (requested > maxTorque) torqueStats.saturated += 1;
+    } else if (joint.isHinge) {
       const angle = joint.constraint.GetCurrentAngle();
       const axisWorld = joint.hingeAxisParentLocal.clone().applyQuaternion(parentQ).normalize();
       const speed = relativeW.dot(axisWorld);
@@ -1120,6 +1267,7 @@ function updateBodyCache() {
     rigCom: rigCom.toArray(),
     comVelocity: comVelocity.toArray(),
     balanceDiagnostics: balanceDiagnostics,
+    footSwing: Object.assign({}, lastFootSwingDiagnostics),
     controller: {
       stiffness: controllerStiffness,
       damping: controllerDamping
@@ -1215,8 +1363,10 @@ function stepFixedPhysics() {
     updateWorldReferencedTargets();
     updateFootPlantController();
     updateRootUprightMoment();
-    applyJointMuscleTorques();
+    const swingTorques = updateFootSwingController();
+    applyJointMuscleTorques(swingTorques);
     joltInterface.Step(substepDt, 1);
+    physicsTimeSeconds += substepDt;
   }
   contactTrackingReady = true;
   testStepCount += 1;
@@ -1278,6 +1428,10 @@ function resetSimulation() {
     joint.lastServoInput = null;
   }
   testStepCount = 0;
+  physicsTimeSeconds = 0;
+  currentFootSwing = null;
+  activeSwingTorques.clear();
+  lastFootSwingDiagnostics = { enabled: false, active: false, completed: false };
 }
 
 function applyImpulse(name, x, y, z) {
@@ -1385,6 +1539,7 @@ function installTestHooks() {
     rebaseJointTargets: rebaseJointTargets,
     applyImpulse: applyImpulse,
     applyImpulseAtOffset: applyImpulseAtOffset,
+    configureFootSwing: configureFootSwing,
     anchorError: window.__lowerBodyAnchorError
   };
 }
